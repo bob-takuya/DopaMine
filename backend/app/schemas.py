@@ -20,6 +20,7 @@ class SeedDemoRequest(BaseModel):
 
 
 class SyncLoginRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
 

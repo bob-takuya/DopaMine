@@ -15,7 +15,15 @@ from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from anki.errors import SyncError
+class _NeverRaised(Exception):
+    """Sentinel so sync error handlers are harmless when anki isn't installed."""
+
+
+try:
+    from anki.errors import NetworkError, SyncError, SyncErrorKind
+except Exception:  # pragma: no cover - anki absent -> sync routes 501 before use
+    SyncError = NetworkError = _NeverRaised  # type: ignore[assignment,misc]
+    SyncErrorKind = None  # type: ignore[assignment]
 
 from app.db import migrate
 from app.demo import run_seed
@@ -188,7 +196,9 @@ def create_app() -> FastAPI:
 
     def require_sync_engine():
         eng = engine()
-        if not hasattr(eng, "sync_login"):
+        # Require the full sync capability, not just login, so no route can hit
+        # a missing method and 500.
+        if not all(hasattr(eng, m) for m in ("sync_login", "sync", "sync_status")):
             raise ApiError(
                 501,
                 "SYNC_UNSUPPORTED",
@@ -326,7 +336,12 @@ def create_app() -> FastAPI:
                 auth = eng.sync_login(body.username, body.password)
                 repo().set_sync_auth(auth["hkey"], auth.get("endpoint", ""))
         except SyncError as exc:
-            raise ApiError(401, "SYNC_AUTH_FAILED", str(exc)) from exc
+            # Only genuine auth failures are 401; server/protocol sync errors are 502.
+            if SyncErrorKind is not None and getattr(exc, "kind", None) == SyncErrorKind.AUTH:
+                raise ApiError(401, "SYNC_AUTH_FAILED", str(exc)) from exc
+            raise ApiError(502, "SYNC_FAILED", str(exc)) from exc
+        except NetworkError as exc:
+            raise ApiError(502, "SYNC_FAILED", str(exc)) from exc
         return {"ok": True, "endpoint": auth.get("endpoint", "")}
 
     @app.post("/api/sync")
@@ -341,7 +356,7 @@ def create_app() -> FastAPI:
                 new_endpoint = result.get("endpoint")
                 if new_endpoint and new_endpoint != auth["endpoint"]:
                     repo().set_sync_auth(auth["hkey"], new_endpoint)
-        except SyncError as exc:
+        except (SyncError, NetworkError) as exc:
             raise ApiError(502, "SYNC_FAILED", str(exc)) from exc
         return result
 
@@ -355,7 +370,7 @@ def create_app() -> FastAPI:
         try:
             with coordinator().lock:
                 result.update(eng.sync_status(auth["hkey"], auth["endpoint"]))
-        except SyncError as exc:
+        except (SyncError, NetworkError) as exc:
             raise ApiError(502, "SYNC_FAILED", str(exc)) from exc
         return result
 
