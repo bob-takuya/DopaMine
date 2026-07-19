@@ -7,6 +7,8 @@ compatibility. Datetimes are stored as ISO-8601 UTC strings.
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import sqlite3
 import tempfile
 import zipfile
@@ -16,6 +18,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fsrs import Card, Rating as FsrsRating, Scheduler
+import zstandard
 
 from .base import AnswerResult, CardView, DeckInfo, ImportSummary, Rating, SrsStats
 
@@ -200,38 +203,64 @@ class FsrsSqliteEngine:
         return [card_id]
 
     def import_apkg(self, apkg_path: str, into_deck: str | None = None) -> ImportSummary:
-        """Import Basic notes from a plain-SQLite Anki package."""
+        """Import rendered notes from an Anki package.
+
+        Media files are not extracted, so media HTML (including ``<img>`` tags)
+        is retained as-is. Cloze notes pragmatically become one fallback card per
+        note, with every cloze ordinal hidden/revealed together.
+        """
 
         try:
-            with zipfile.ZipFile(apkg_path) as package:
-                members = set(package.namelist())
-                collection_name = next(
-                    (name for name in ("collection.anki21", "collection.anki2") if name in members),
-                    None,
-                )
-                if collection_name is None:
-                    if "collection.anki21b" in members:
-                        raise ValueError(
-                            "zstd-compressed collection.anki21b is not supported by the fallback "
-                            "engine; re-export as a legacy .apkg"
-                        )
-                    raise ValueError("Anki package contains no supported collection database")
-                collection_bytes = package.read(collection_name)
+            package = zipfile.ZipFile(apkg_path)
         except (OSError, zipfile.BadZipFile) as exc:
             raise ValueError(f"invalid Anki package: {exc}") from exc
 
-        try:
+        with package:
+            members = set(package.namelist())
+            collection_name = next(
+                (
+                    name
+                    for name in (
+                        "collection.anki21b",
+                        "collection.anki21",
+                        "collection.anki2",
+                    )
+                    if name in members
+                ),
+                None,
+            )
+            if collection_name is None:
+                raise ValueError("Anki package contains no supported collection database")
+
             with tempfile.TemporaryDirectory(prefix="dopamine-apkg-") as temp_dir:
-                collection_path = Path(temp_dir) / collection_name
-                collection_path.write_bytes(collection_bytes)
+                collection_path = Path(temp_dir) / "collection.sqlite3"
+                try:
+                    with package.open(collection_name) as source_file, collection_path.open(
+                        "wb"
+                    ) as destination:
+                        if collection_name.endswith(".anki21b"):
+                            dctx = zstandard.ZstdDecompressor()
+                            with dctx.stream_reader(source_file) as reader:
+                                shutil.copyfileobj(reader, destination)
+                        else:
+                            shutil.copyfileobj(source_file, destination)
+                except (OSError, zstandard.ZstdError) as exc:
+                    raise ValueError(f"invalid Anki collection database: {exc}") from exc
+
                 uri = f"{collection_path.as_uri()}?mode=ro"
                 try:
                     with sqlite3.connect(uri, uri=True) as source:
                         source.row_factory = sqlite3.Row
+                        source.create_collation(
+                            "unicase",
+                            lambda left, right: (left.casefold() > right.casefold())
+                            - (left.casefold() < right.casefold()),
+                        )
                         deck_names = self._apkg_deck_names(source)
+                        models = self._apkg_models(source)
                         rows = source.execute(
                             """
-                            SELECT n.id, n.flds, n.tags, c.did
+                            SELECT n.id, n.mid, n.flds, n.tags, c.did
                             FROM notes AS n
                             LEFT JOIN cards AS c ON c.id = (
                                 SELECT MIN(c2.id) FROM cards AS c2 WHERE c2.nid = n.id
@@ -241,16 +270,13 @@ class FsrsSqliteEngine:
                         ).fetchall()
                 except sqlite3.Error as exc:
                     raise ValueError(f"invalid Anki collection database: {exc}") from exc
-        finally:
-            collection_bytes = b""
 
         imported_decks: set[str] = set()
         notes_imported = 0
         cards_imported = 0
         for row in rows:
             fields = str(row["flds"]).split("\x1f")
-            front = fields[0] if fields else ""
-            back = fields[1] if len(fields) > 1 else ""
+            front, back = self._render_apkg_note(models.get(str(row["mid"])), fields)
             original_deck = deck_names.get(str(row["did"])) if row["did"] is not None else None
             deck_name = into_deck or original_deck or "Imported"
             card_ids = self.add_note(
@@ -263,6 +289,165 @@ class FsrsSqliteEngine:
             cards_imported += len(card_ids)
 
         return ImportSummary(tuple(sorted(imported_decks)), notes_imported, cards_imported)
+
+    @staticmethod
+    def _apkg_models(connection: sqlite3.Connection) -> dict[str, dict[str, object]]:
+        """Load note types from legacy JSON or compatible modern tables."""
+        models: dict[str, dict[str, object]] = {}
+        try:
+            row = connection.execute("SELECT models FROM col LIMIT 1").fetchone()
+            decoded = json.loads(row["models"]) if row is not None and row["models"] else {}
+            if isinstance(decoded, dict):
+                models.update(
+                    (str(model_id), model)
+                    for model_id, model in decoded.items()
+                    if isinstance(model, dict)
+                )
+        except (sqlite3.Error, ValueError, TypeError):
+            pass
+        if models:
+            return models
+
+        tables = {
+            row["name"]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        if not {"notetypes", "fields", "templates"}.issubset(tables):
+            return models
+
+        def columns(table: str) -> set[str]:
+            return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+
+        nt_columns = columns("notetypes")
+        field_columns = columns("fields")
+        template_columns = columns("templates")
+        type_column = "type" if "type" in nt_columns else None
+        config_column = "config" if "config" in nt_columns else None
+        for row in connection.execute(
+            f"SELECT id, name{', type' if type_column else ''}"
+            f"{', config' if config_column else ''} FROM notetypes"
+        ):
+            model_type = row["type"] if type_column else 0
+            if not type_column and config_column:
+                try:
+                    from anki.notetypes_pb2 import Notetype
+
+                    model_type = Notetype.Config.FromString(row["config"]).kind
+                except (ImportError, TypeError, ValueError):
+                    pass
+            models[str(row["id"])] = {
+                "id": row["id"],
+                "name": row["name"],
+                "type": model_type,
+                "flds": [],
+                "tmpls": [],
+            }
+        if {"ntid", "ord", "name"}.issubset(field_columns):
+            for row in connection.execute("SELECT ntid, ord, name FROM fields"):
+                model = models.get(str(row["ntid"]))
+                if model is not None:
+                    model["flds"].append({"name": row["name"], "ord": row["ord"]})
+        if {"ntid", "ord", "name", "qfmt", "afmt"}.issubset(template_columns):
+            for row in connection.execute(
+                "SELECT ntid, ord, name, qfmt, afmt FROM templates"
+            ):
+                model = models.get(str(row["ntid"]))
+                if model is not None:
+                    model["tmpls"].append(dict(row))
+        elif {"ntid", "ord", "name", "config"}.issubset(template_columns):
+            for row in connection.execute("SELECT ntid, ord, name, config FROM templates"):
+                model = models.get(str(row["ntid"]))
+                if model is None:
+                    continue
+                try:
+                    from anki.notetypes_pb2 import Notetype
+
+                    config = Notetype.Template.Config.FromString(row["config"])
+                    model["tmpls"].append(
+                        {
+                            "name": row["name"],
+                            "ord": row["ord"],
+                            "qfmt": config.q_format,
+                            "afmt": config.a_format,
+                        }
+                    )
+                except (ImportError, TypeError, ValueError):
+                    pass
+        return models
+
+    @classmethod
+    def _render_apkg_note(
+        cls, model: dict[str, object] | None, values: list[str]
+    ) -> tuple[str, str]:
+        fallback = (values[0] if values else "", values[1] if len(values) > 1 else "")
+        if not model:
+            return fallback
+        try:
+            field_defs = sorted(model.get("flds", []), key=lambda field: int(field.get("ord", 0)))
+            fields = {
+                str(field.get("name", "")): values[index] if index < len(values) else ""
+                for index, field in enumerate(field_defs)
+            }
+            if int(model.get("type", 0)) == 1:
+                return cls._render_cloze(fields, model)
+            templates = sorted(
+                model.get("tmpls", []), key=lambda template: int(template.get("ord", 0))
+            )
+            if not templates:
+                return fallback
+            qfmt = str(templates[0].get("qfmt", ""))
+            afmt = str(templates[0].get("afmt", ""))
+            front = cls._render_template(qfmt, fields)
+            back = cls._render_template(afmt, {**fields, "FrontSide": front})
+            return front, back
+        except (AttributeError, TypeError, ValueError):
+            return fallback
+
+    @staticmethod
+    def _render_template(template: str, fields: Mapping[str, str]) -> str:
+        section = re.compile(r"{{([#^])\s*([^{}]+?)\s*}}(.*?){{/\s*\2\s*}}", re.DOTALL)
+        while True:
+            rendered, count = section.subn(
+                lambda match: match.group(3)
+                if bool(fields.get(match.group(2).strip(), "")) == (match.group(1) == "#")
+                else "",
+                template,
+            )
+            template = rendered
+            if not count:
+                break
+        template = re.sub(
+            r"{{\s*([^{}]+?)\s*}}",
+            lambda match: str(fields.get(match.group(1).strip(), "")),
+            template,
+        )
+        return template
+
+    @classmethod
+    def _render_cloze(
+        cls, fields: Mapping[str, str], model: Mapping[str, object]
+    ) -> tuple[str, str]:
+        templates = model.get("tmpls", [])
+        qfmt = str(templates[0].get("qfmt", "")) if templates else ""
+        match = re.search(r"{{\s*cloze:([^{}]+?)\s*}}", qfmt)
+        cloze_field = match.group(1).strip() if match else "Text"
+        text = str(fields.get(cloze_field, next(iter(fields.values()), "")))
+        cloze = re.compile(r"{{c\d+::(.*?)}}", re.DOTALL | re.IGNORECASE)
+
+        def parts(match: re.Match[str]) -> tuple[str, str]:
+            answer, separator, hint = match.group(1).partition("::")
+            return answer, hint if separator else ""
+
+        front = cloze.sub(
+            lambda item: f"[{parts(item)[1]}]" if parts(item)[1] else "[...]", text
+        )
+        back = cloze.sub(
+            lambda item: f'<span class="cloze">{parts(item)[0]}</span>', text
+        )
+        back_extra = str(fields.get("Back Extra", ""))
+        if back_extra:
+            back += f"<br>{back_extra}"
+        return front, back
 
     @staticmethod
     def _apkg_deck_names(connection: sqlite3.Connection) -> dict[str, str]:
@@ -294,7 +479,7 @@ class FsrsSqliteEngine:
         ).fetchone()
         if has_decks_table:
             for row in connection.execute("SELECT id, name FROM decks"):
-                names[str(row["id"])] = str(row["name"])
+                names[str(row["id"])] = str(row["name"]).replace("\x1f", "::")
 
         return names
 
