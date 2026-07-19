@@ -91,6 +91,7 @@ function clearRoot(): void {
 
 function renderDeckPicker(): void {
   clearRoot();
+  syncFinishBtn = null; // the study-view sync button is gone once we leave the feed
   const snap = store.get();
   const wrap = document.createElement("div");
   wrap.className = "picker";
@@ -201,6 +202,11 @@ function startFeed(deck: string | null): void {
   const shell = document.createElement("div");
   shell.className = "app-shell";
 
+  // New study session for this deck: reset the per-tab review counter and the
+  // one-shot leave-sync guard so the auto-sync safety net can fire again.
+  sessionReviews = 0;
+  leaveSyncFired = false;
+
   // Back-to-decks affordance lives in the HUD area via a small control.
   const back = document.createElement("button");
   back.className = "back-btn";
@@ -209,10 +215,26 @@ function startFeed(deck: string | null): void {
   back.textContent = "‹ Decks";
   back.addEventListener("click", () => renderDeckPicker());
 
-  feed = new Feed(api, store);
-  shell.append(hud.el, feed.el, back);
+  // "☁ 同期して終了" — sync the whole collection back to AnkiWeb, then show a
+  // calm "done, safe to close" screen. Only visible when sync is available
+  // (logged in on the Anki engine); otherwise it stays hidden, no error shown.
+  const syncFinish = document.createElement("button");
+  syncFinish.className = "sync-finish-btn";
+  syncFinish.type = "button";
+  syncFinish.textContent = "☁ 同期して終了";
+  syncFinish.hidden = !canSync();
+  syncFinish.addEventListener("click", () => void doSyncFinish(syncFinish));
+  syncFinishBtn = syncFinish;
+
+  feed = new Feed(api, store, { onReview: () => onSessionReview() });
+  shell.append(hud.el, feed.el, back, syncFinish);
   appRoot!.appendChild(shell);
   void feed.start(deck);
+}
+
+/** One review committed in the feed — count it for the session summary + gate. */
+function onSessionReview(): void {
+  sessionReviews += 1;
 }
 
 // ---- Settings sheet (guardrails, mute, haptics, reduced motion) ----------
@@ -489,6 +511,9 @@ function renderSyncLogin(body: HTMLElement): void {
       passInput.value = "";
       showToast(`Logged in to ${res.endpoint || "AnkiWeb"}`, "success");
       store.setMock(api.isMock());
+      // A fresh login makes whole-collection sync available — re-check so the
+      // "☁ 同期して終了" affordance turns on.
+      void refreshSyncAvailability();
       renderSyncLoggedIn(body);
     } catch (err) {
       // Clear the password regardless of outcome; never render it back.
@@ -546,6 +571,8 @@ function renderSyncLoggedIn(body: HTMLElement, required?: string): void {
       /* best-effort: drop the local view even if the call failed */
     }
     syncEndpoint = null;
+    syncAvailable = false; // sync is no longer available once logged out
+    if (syncFinishBtn) syncFinishBtn.hidden = true;
     showToast("Logged out of AnkiWeb", "success");
     renderSyncLogin(body);
   });
@@ -657,6 +684,7 @@ async function doSync(btn: HTMLButtonElement, body: HTMLElement): Promise<void> 
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Syncing…";
+  syncInFlight = true;
   try {
     const res = await api.sync();
     if (res.status === "full_sync_required") {
@@ -688,10 +716,150 @@ async function doSync(btn: HTMLButtonElement, body: HTMLElement): Promise<void> 
     const msg = err instanceof Error ? err.message : String(err);
     showToast(`Sync failed: ${msg}`, "error");
   } finally {
+    syncInFlight = false;
     btn.disabled = false;
     btn.textContent = original ?? "Sync now";
   }
 }
+
+// ---- Sync & finish study flow --------------------------------------------
+//
+// A logged-in user studies the deck they picked, then taps "☁ 同期して終了" to
+// push their reviews to AnkiWeb (sync is WHOLE-COLLECTION; there is no per-deck
+// sync). We also fire a best-effort background sync when the tab is closed or
+// backgrounded, so reviews aren't stranded if the user just walks away.
+
+// Cached sync-availability: true only when logged in on the Anki engine. Under
+// the FSRS engine syncStatus() 501s (SYNC_UNSUPPORTED) and this stays false, so
+// the sync-finish affordances simply never appear (no errors shown).
+let syncAvailable = false;
+// Per-tab study-session review count (drives the summary + the leave-sync gate).
+let sessionReviews = 0;
+// One-shot guard so the leave beacon fires at most once per hidden transition.
+let leaveSyncFired = false;
+// True while a manual sync (finish button or panel "Sync now") is in flight, so
+// the leave beacon never double-fires on top of it.
+let syncInFlight = false;
+// The live study-view sync button, when mounted (null on the deck picker).
+let syncFinishBtn: HTMLButtonElement | null = null;
+
+/** Is a whole-collection AnkiWeb sync usable right now? (logged in, Anki engine) */
+function canSync(): boolean {
+  return syncAvailable;
+}
+
+/** Check sync availability once and cache it; also reflect it on the live button. */
+async function refreshSyncAvailability(): Promise<void> {
+  try {
+    const status = await api.syncStatus();
+    syncAvailable = status.logged_in === true;
+  } catch {
+    // 501 SYNC_UNSUPPORTED (FSRS engine) or a transient failure — treat as
+    // "sync unavailable" and hide the affordance rather than surfacing an error.
+    syncAvailable = false;
+  }
+  if (syncFinishBtn) syncFinishBtn.hidden = !canSync();
+}
+
+/** Tap handler: sync the collection, then show the calm "完了" screen. */
+async function doSyncFinish(btn: HTMLButtonElement): Promise<void> {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "同期中…";
+  syncInFlight = true;
+  try {
+    const res = await api.sync();
+    store.setMock(api.isMock());
+    if (res.status === "full_sync_required") {
+      showToast(
+        "フルシンクが必要です。「☁ AnkiWeb Sync」パネルの「Advanced / bootstrap」から取り込んでください。",
+        "warning",
+      );
+      return;
+    }
+    showFinishScreen();
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 401 || err.code === "SYNC_NOT_LOGGED_IN")) {
+      // Session expired: sync is no longer available; hide the button too.
+      syncAvailable = false;
+      if (syncFinishBtn) syncFinishBtn.hidden = true;
+      showToast("AnkiWebに再ログインしてください", "error");
+    } else {
+      // 502 SYNC_FAILED (and any other fault): surface the server's message.
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(`同期に失敗しました: ${msg}`, "error");
+    }
+  } finally {
+    syncInFlight = false;
+    btn.disabled = false;
+    btn.textContent = original ?? "☁ 同期して終了";
+  }
+}
+
+/** Calm terminal overlay: "synced — safe to close", with a session summary. */
+function showFinishScreen(): void {
+  const backdrop = document.createElement("div");
+  backdrop.className = "sheet-backdrop finish-backdrop";
+  const sheet = document.createElement("div");
+  sheet.className = "sheet finish-sheet";
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-label", "同期完了");
+
+  const h = document.createElement("h2");
+  h.textContent = "完了 🎉";
+  sheet.appendChild(h);
+
+  const note = document.createElement("p");
+  note.className = "sheet__note";
+  note.textContent = "同期しました。タブを閉じてOKです。";
+  sheet.appendChild(note);
+
+  const deck = store.get().activeDeck;
+  const summary = document.createElement("p");
+  summary.className = "finish-summary";
+  summary.textContent = `デッキ: ${deck ? deck : "すべての期限カード"} ・ このセッションの学習: ${sessionReviews}枚`;
+  sheet.appendChild(summary);
+
+  const cont = document.createElement("button");
+  cont.className = "primary-btn";
+  cont.type = "button";
+  cont.textContent = "続ける";
+  cont.addEventListener("click", () => backdrop.remove());
+  sheet.appendChild(cont);
+
+  backdrop.appendChild(sheet);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) backdrop.remove();
+  });
+  document.body.appendChild(backdrop);
+}
+
+/**
+ * Best-effort safety net: when the tab is hidden/unloaded and the user studied
+ * at least one card, push their reviews with sendBeacon (guaranteed delivery
+ * even during unload). Fire-and-forget: never awaited, never in mock mode, never
+ * when not logged in, and at most once per hidden transition.
+ */
+function leaveSync(): void {
+  if (leaveSyncFired || syncInFlight) return;
+  if (!canSync() || api.isMock()) return;
+  if (sessionReviews < 1) return;
+  leaveSyncFired = true;
+  try {
+    navigator.sendBeacon(
+      `${api.baseUrl}/api/sync`,
+      new Blob([], { type: "application/json" }),
+    );
+  } catch {
+    /* best-effort only — nothing to recover if the beacon can't be queued */
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) leaveSync();
+  else leaveSyncFired = false; // re-arm for the next hidden transition
+});
+window.addEventListener("pagehide", () => leaveSync());
 
 // ---- Service worker (offline app shell) ----------------------------------
 
@@ -723,6 +891,11 @@ async function main(): Promise<void> {
 
   await bootData();
   renderDeckPicker(); // re-render with authoritative decks
+
+  // Detect whole-collection sync availability once (logged in on the Anki
+  // engine). Cached in `syncAvailable`; deliberately does NOT auto-pull — the
+  // user pulls via the sync panel's "Sync now" if they studied elsewhere.
+  void refreshSyncAvailability();
 }
 
 void main();

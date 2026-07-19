@@ -252,6 +252,41 @@ button {
   backdrop-filter: blur(8px);
 }
 
+/* "☁ 同期して終了" — mirrors the back button on the right, neon-highlighted so
+   it reads as the deliberate finish action. Hidden unless sync is available. */
+.sync-finish-btn {
+  position: fixed;
+  right: 10px;
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  z-index: 30;
+  border: 1px solid rgba(36, 224, 255, 0.6);
+  background: rgba(18, 18, 31, 0.82);
+  color: var(--neon-cyan);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 800;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 18px rgba(36, 224, 255, 0.25);
+}
+.sync-finish-btn:disabled {
+  opacity: 0.6;
+}
+.sync-finish-btn[hidden] {
+  display: none;
+}
+
+/* Calm "完了" finish screen — reuses the sheet chrome. */
+.finish-sheet {
+  text-align: center;
+}
+.finish-summary {
+  margin: 4px 0 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
 .feed {
   position: relative;
   flex: 1;

@@ -42,6 +42,7 @@ export class Feed {
   constructor(
     private api: ApiClient,
     private store: Store,
+    private opts: { onReview?: () => void } = {},
   ) {
     this.el = document.createElement("main");
     this.el.className = "feed";
@@ -220,6 +221,8 @@ export class Feed {
   private async advance(): Promise<void> {
     const outgoing = this.active;
     this.reviewsSinceContinue += 1;
+    // One review committed — notify the host (drives "sync & finish" gating).
+    this.opts.onReview?.();
 
     // Animate the answered card out.
     if (outgoing) {
