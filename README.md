@@ -52,10 +52,42 @@ npm run dev                            # http://localhost:5173  (proxies /api �
 Open http://localhost:5173, tap **Seed demo deck**, and start swiping.
 Demo the UI standalone with no backend at all: http://localhost:5173/?mock=1
 
+## Run it on your phone (same Wi-Fi)
+
+One command builds the app and serves **everything** (API + UI) from a single
+server bound to your LAN — the SPA calls the API same-origin, so there's no
+`localhost` trap and no CORS to configure:
+```bash
+./scripts/serve.sh          # builds frontend, runs the server on 0.0.0.0:8000
+```
+It prints a `http://<your-computer-ip>:8000` URL — open that in your phone's
+browser (phone on the same Wi-Fi). Tap **Seed demo deck** and swipe. Add it to
+your home screen for a full-screen, app-like feel.
+- For real decks/scheduling/sync on the phone, run with the Anki engine:
+  `DOPAMINE_SRS_ENGINE=anki DOPAMINE_ANKI_COLLECTION=/path/collection.anki2 ./scripts/serve.sh`
+- First connection may need you to allow incoming connections in the macOS
+  firewall. Plain-HTTP LAN means the offline service worker won't register
+  (secure-context only) — the app still works; it just won't cache for offline.
+
+## Publish a demo on GitHub Pages
+
+GitHub Pages serves **static files only**, so it can't run the Python backend —
+but the frontend has a full in-browser **mock mode**, so you can publish a
+**playable demo** (swipe/grade/reward/streak, all faked client-side; no real
+FSRS, import, media, or AnkiWeb sync). A workflow is included:
+- Push to `main` with Pages enabled (Settings → Pages → Source: **GitHub Actions**).
+  `.github/workflows/pages.yml` builds `npm run build:demo` (forces mock mode,
+  sets the base to `/<repo>/`) and deploys it.
+- Build it locally: `cd frontend && DOPAMINE_BASE=/anki-addiction/ npm run build:demo`
+  (output in `frontend/dist`).
+- **The real app (real Anki decks, scheduling, import, sync) needs the backend
+  running** — host it yourself (locally per above, or on any Python host) and
+  point the SPA at it with `?api=https://your-backend`.
+
 ## Test it
 ```bash
-./.venv/bin/python -m pytest backend/tests/ -q        # 46 passing (both engines + API + rewards)
-cd frontend && npm run build                          # clean strict-TS build
+./.venv/bin/python -m pytest backend/tests/ -q        # 84 passing (engines + API + rewards + import + media + sync)
+cd frontend && npm run build && npm run e2e           # strict-TS build + 5 headless Playwright specs
 ```
 
 ---

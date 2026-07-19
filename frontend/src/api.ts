@@ -27,7 +27,13 @@ import type {
 } from "./types.ts";
 import { mockApi } from "./mock.ts";
 
-const DEFAULT_BASE = "http://localhost:8000";
+// Same-origin by default: the SPA calls "/api/..." on whatever host served it.
+// This is what makes the app work unchanged on localhost, over the LAN from a
+// phone (served by FastAPI or the vite dev proxy), and from any single-origin
+// deployment — with no CORS and no "localhost points at the phone" trap.
+// Override at runtime with ?api=http://host:8000, or at build time via
+// VITE_API_BASE, when the backend lives on a different origin.
+const DEFAULT_BASE = "";
 
 /** Thrown for structured API errors ({"error":{"code","message"}}) and HTTP faults. */
 export class ApiError extends Error {
@@ -355,11 +361,16 @@ class NetworkError extends Error {
 /** Read desired base URL + mock flag from the environment / URL. */
 export function createApiClient(): ApiClient {
   const params = new URLSearchParams(globalThis.location?.search ?? "");
-  const forceMock = params.get("mock") === "1";
+  // Force mock via ?mock=1 (runtime) or VITE_FORCE_MOCK=1 (build time, e.g. the
+  // backend-less GitHub Pages demo).
+  const forceMock =
+    params.get("mock") === "1" ||
+    import.meta.env?.VITE_FORCE_MOCK === "1" ||
+    import.meta.env?.VITE_FORCE_MOCK === true;
   const baseFromQuery = params.get("api") || undefined;
   const baseUrl =
-    baseFromQuery ||
-    (import.meta.env?.VITE_API_BASE as string | undefined) ||
+    baseFromQuery ??
+    (import.meta.env?.VITE_API_BASE as string | undefined) ??
     DEFAULT_BASE;
   return new HttpApiClient({ baseUrl, forceMock });
 }

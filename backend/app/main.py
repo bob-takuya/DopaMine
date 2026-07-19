@@ -8,6 +8,7 @@ import re
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -15,6 +16,7 @@ from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 class _NeverRaised(Exception):
     """Sentinel so sync error handlers are harmless when anki isn't installed."""
 
@@ -379,6 +381,16 @@ def create_app() -> FastAPI:
         require_sync_engine()
         repo().clear_sync_auth()
         return {"ok": True}
+
+    # Serve the built SPA (frontend/dist) same-origin when it exists, so a single
+    # `uvicorn --host 0.0.0.0 --port 8000` serves BOTH the API and the app — this
+    # is what makes the app reachable from a phone on the LAN at http://<ip>:8000
+    # with no separate frontend server, no proxy, and no CORS. Mounted last so the
+    # explicit /api/* routes always win. Skips gracefully when unbuilt (dev uses
+    # the vite dev server instead).
+    dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if dist.is_dir() and (dist / "index.html").exists():
+        app.mount("/", StaticFiles(directory=str(dist), html=True), name="spa")
 
     return app
 

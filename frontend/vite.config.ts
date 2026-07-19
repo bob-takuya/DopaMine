@@ -4,6 +4,9 @@ import { defineConfig } from "vite";
 export default defineConfig({
   root: ".",
   publicDir: "public",
+  // Base path. "/" for local/single-server use; set DOPAMINE_BASE=/<repo>/ for a
+  // GitHub Pages project site so assets + the service worker resolve correctly.
+  base: process.env.DOPAMINE_BASE || "/",
   server: {
     port: 5173,
     // Proxy /api to the FastAPI backend during local dev so the SPA can be
