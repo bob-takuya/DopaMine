@@ -41,10 +41,16 @@ COPY --from=frontend /app/frontend/dist /app/frontend/dist
 
 # Persistent data (game.sqlite3, srs.sqlite3, media, optional collection.anki2)
 # lives here — mount a volume at /data on your host.
-RUN useradd -m app && mkdir -p /data && chown -R app:app /data
-USER app
+RUN mkdir -p /data
 
+# Run as ROOT. Managed hosts (Railway, etc.) mount the persistent volume at /data
+# ROOT-OWNED at runtime, which hides any build-time chown and makes a non-root
+# process fail to create the SQLite/collection files — presenting as "TLS ok but
+# the app never responds" (curl 000) because uvicorn exits before it listens.
+# Running as root keeps /data writable everywhere. (Personal-use deployment.)
 WORKDIR /app/backend
 EXPOSE 8000
-# Shell form so hosts that inject $PORT (Railway) are honoured; default 8000 (Fly).
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Shell form: honour a host-injected $PORT (Railway) else 8000 (Fly/local). The
+# `test -w /data` guard fails FAST with a clear error if the volume isn't
+# writable, instead of hanging.
+CMD ["sh", "-ec", "mkdir -p /data; test -w /data; exec uvicorn app.main:app --host 0.0.0.0 --port \"${PORT:-8000}\""]
