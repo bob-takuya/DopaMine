@@ -12,3 +12,8 @@ collection.media/
 backend/data/*.db
 orchestration/*_out.txt
 orchestration/*_log.txt
+
+# playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/.playwright/

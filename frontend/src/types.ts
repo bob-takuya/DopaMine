@@ -183,6 +183,21 @@ export interface ConfigResponse {
   config: GuardrailConfig;
 }
 
+// ---- Import (.apkg) --------------------------------------------------------
+
+/** Summary of a successful `.apkg` import (POST /api/import -> `imported`). */
+export interface ImportSummary {
+  /** Deck names that received cards, e.g. ["Imported::JLPT N5"]. */
+  decks: string[];
+  notes: number;
+  cards: number;
+}
+
+/** POST /api/import wire response. */
+export interface ImportResponse {
+  imported: ImportSummary;
+}
+
 /** Uniform error envelope: {"error":{"code","message"}}. */
 export interface ApiErrorEnvelope {
   error: {

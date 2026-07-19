@@ -14,6 +14,8 @@ import type {
   ConfigResponse,
   DecksResponse,
   GuardrailPatch,
+  ImportResponse,
+  ImportSummary,
   NextCardResponse,
   Rating,
   SeedDemoResponse,
@@ -48,6 +50,8 @@ export interface ApiClient {
   getDecks(): Promise<DecksResponse>;
   seedDemo(deck: string, replace?: boolean): Promise<SeedDemoResponse>;
   putConfig(patch: GuardrailPatch): Promise<ConfigResponse>;
+  /** Upload an .apkg, returning the import summary. */
+  importApkg(file: File): Promise<ImportSummary>;
 }
 
 interface ApiClientOptions {
@@ -240,6 +244,51 @@ class HttpApiClient implements ApiClient {
       }
       throw err;
     }
+  }
+
+  async importApkg(file: File): Promise<ImportSummary> {
+    if (this.mock) return mockApi.importApkg(file);
+
+    // multipart/form-data — the browser sets the Content-Type boundary, so we do
+    // NOT reuse the JSON `request` helper here. Parsing large packages can be
+    // slow, so allow a more generous timeout than ordinary calls.
+    const form = new FormData();
+    form.append("file", file);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), Math.max(this.timeoutMs, 60_000));
+    let res: Response;
+    try {
+      res = await fetch(this.url(`/api/import`), {
+        method: "POST",
+        body: form,
+        signal: ctrl.signal,
+        headers: { Accept: "application/json" },
+      });
+    } catch {
+      // Network-level failure only: fall back to a faked summary so the flow is
+      // demoable offline. Real API errors (415/413/501/…) still surface below.
+      this.setMock(true);
+      return mockApi.importApkg(file);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const text = await res.text();
+    let body: unknown = undefined;
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = undefined;
+      }
+    }
+    if (!res.ok) {
+      const env = body as { error?: { code?: string; message?: string } } | undefined;
+      const code = env?.error?.code ?? `HTTP_${res.status}`;
+      const message = env?.error?.message ?? res.statusText ?? "import failed";
+      throw new ApiError(code, message, res.status);
+    }
+    return (body as ImportResponse).imported;
   }
 }
 

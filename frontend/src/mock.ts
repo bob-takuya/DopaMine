@@ -15,6 +15,7 @@ import {
   type DecksResponse,
   type GuardrailConfig,
   type GuardrailPatch,
+  type ImportSummary,
   type LootTier,
   type NextCardResponse,
   type PlayerState,
@@ -97,6 +98,7 @@ class MockBackend {
   // review_id -> prior response (idempotent replay)
   private answered = new Map<string, AnswerResponse>();
   private reviewedCount = 0;
+  private importSeq = 0;
 
   constructor() {
     this.seedInternal(false);
@@ -192,6 +194,52 @@ class MockBackend {
 
   async seedDemo(_deck: string, replace = false): Promise<SeedDemoResponse> {
     return this.seedInternal(replace);
+  }
+
+  /**
+   * Fake an .apkg import so the flow is demoable offline (?mock=1 or after a
+   * network failure). Derives a plausible deck name from the file name, adds a
+   * small set of cards to the in-memory scheduler, and returns a summary shaped
+   * exactly like the real POST /api/import `imported` object.
+   */
+  async importApkg(file: File): Promise<ImportSummary> {
+    const base = (file.name || "deck").replace(/\.(apkg|colpkg)$/i, "").trim() || "deck";
+    // Mimic Anki's "::" subdeck path; title-case the leaf for a friendly label.
+    const leaf = base
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    const deck = `Imported::${leaf}`;
+
+    const notes: Array<{ front: string; back: string }> = [
+      { front: "一", back: "one" },
+      { front: "二", back: "two" },
+      { front: "三", back: "three" },
+      { front: "四", back: "four" },
+      { front: "五", back: "five" },
+      { front: "六", back: "six" },
+      { front: "七", back: "seven" },
+      { front: "八", back: "eight" },
+      { front: "九", back: "nine" },
+      { front: "十", back: "ten" },
+      { front: "百", back: "hundred" },
+      { front: "千", back: "thousand" },
+    ];
+
+    this.importSeq += 1;
+    const seq = this.importSeq;
+    const added: MockCard[] = notes.map((n, i) => ({
+      card_id: `import-${seq}-${i + 1}`,
+      note_id: `import-note-${seq}-${i + 1}`,
+      deck,
+      front_html: n.front,
+      back_html: n.back,
+      tags: ["imported"],
+      due_at: nowIso(),
+    }));
+    this.cards.push(...added);
+    this.queue.push(...added.map((c) => c.card_id));
+
+    return { decks: [deck], notes: notes.length, cards: notes.length };
   }
 
   async putConfig(patch: GuardrailPatch): Promise<ConfigResponse> {

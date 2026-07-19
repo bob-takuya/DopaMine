@@ -5,7 +5,7 @@
 //  4. Show a deck picker / seed-demo screen, then mount the feed + HUD.
 
 import "./styles.css";
-import { createApiClient } from "./api.ts";
+import { ApiError, createApiClient } from "./api.ts";
 import { cache } from "./cache.ts";
 import { Hud } from "./components/hud.ts";
 import { effects } from "./effects.ts";
@@ -137,6 +137,23 @@ function renderDeckPicker(): void {
     }
   });
 
+  // Import .apkg — a styled label wrapping a real file input so Playwright /
+  // native pickers can drive it, while the neon button chrome stays consistent.
+  const importLabel = document.createElement("label");
+  importLabel.className = "ghost-btn import-label";
+  const importText = document.createElement("span");
+  importText.textContent = "⬆ Import .apkg";
+  const importInput = document.createElement("input");
+  importInput.type = "file";
+  importInput.accept = ".apkg,.colpkg";
+  importInput.className = "import-input";
+  importInput.setAttribute("aria-label", "Import an Anki .apkg deck");
+  importInput.addEventListener("change", () => {
+    const file = importInput.files?.[0];
+    if (file) void importDeck(file, importLabel, importText);
+  });
+  importLabel.append(importText, importInput);
+
   const allBtn = document.createElement("button");
   allBtn.className = "ghost-btn";
   allBtn.type = "button";
@@ -149,7 +166,7 @@ function renderDeckPicker(): void {
   settingsBtn.textContent = "⚙ Settings & guardrails";
   settingsBtn.addEventListener("click", () => openSettings());
 
-  actions.append(seedBtn, allBtn, settingsBtn);
+  actions.append(seedBtn, importLabel, allBtn, settingsBtn);
   wrap.appendChild(actions);
 
   if (snap.mock) {
@@ -356,6 +373,54 @@ async function main(): Promise<void> {
 }
 
 void main();
+
+// ---- Import (.apkg) flow ---------------------------------------------------
+
+async function importDeck(
+  file: File,
+  label: HTMLElement,
+  text: HTMLElement,
+): Promise<void> {
+  const original = text.textContent;
+  label.classList.add("import-label--busy");
+  text.textContent = "⬆ Importing…";
+  try {
+    const summary = await api.importApkg(file);
+    const deck = summary.decks[0] ?? "your deck";
+    showToast(`Imported ${summary.cards} cards into ${deck}`, "success");
+    store.setMock(api.isMock());
+    // Refetch authoritative decks so the new deck appears; let the user pick it.
+    await bootData();
+    renderDeckPicker();
+  } catch (err) {
+    // Surface the server's error message (e.g. 501 IMPORT_UNSUPPORTED, 415).
+    const msg = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+    showToast(`Import failed: ${msg}`, "error");
+    label.classList.remove("import-label--busy");
+    text.textContent = original;
+  }
+}
+
+// ---- Toast ----------------------------------------------------------------
+
+let toastTimer = 0;
+
+function showToast(message: string, kind: "success" | "error" = "success"): void {
+  let toast = document.querySelector<HTMLElement>(".toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.className = "toast";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.className = `toast toast--${kind} toast--show`;
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toast?.classList.remove("toast--show");
+  }, 4200);
+}
 
 // Minimal HTML escaping for text interpolated into innerHTML above.
 function escapeHtml(s: string): string {

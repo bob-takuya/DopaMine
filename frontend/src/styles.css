@@ -167,6 +167,64 @@ button {
   background: transparent;
 }
 
+/* Import .apkg — styled label wrapping a real (visually hidden) file input. */
+.import-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.import-label--busy {
+  opacity: 0.65;
+  pointer-events: none;
+}
+.import-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Toast (import result / transient messages) ---- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 20px);
+  transform: translate(-50%, 20px);
+  z-index: 70;
+  max-width: min(92vw, 480px);
+  padding: 13px 18px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.toast--show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.toast--success {
+  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-lime));
+  color: #08131a;
+}
+.toast--error {
+  background: rgba(255, 84, 112, 0.16);
+  border: 1px solid var(--danger);
+  color: #ffd0da;
+}
+
 /* ---- App shell / feed ---- */
 .app-shell {
   position: relative;
