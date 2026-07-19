@@ -129,6 +129,39 @@ class AnkiLibEngine:
         out = self.col.sync_status(auth)
         return {"required": SyncStatusResponse.Required.Name(out.required)}
 
+    def sync_full(self, hkey: str, endpoint: str, direction: str) -> dict[str, str]:
+        """Perform a one-shot FULL sync — the ONLY way to reconcile a collection
+        that diverged from AnkiWeb (e.g. a fresh DopaMine collection vs. an
+        account that already has decks).
+
+        ``direction`` is ``"download"`` (AnkiWeb -> here, replacing local) or
+        ``"upload"`` (here -> AnkiWeb, replacing the server). This overwrites one
+        side wholesale, so callers must confirm with the user first. Mirrors
+        Anki's own flow: sync_collection (to learn server_usn) ->
+        close_for_full_sync -> full_upload_or_download -> reopen(after_full_sync).
+        """
+        if direction not in ("download", "upload"):
+            raise ValueError("direction must be 'download' or 'upload'")
+        upload = direction == "upload"
+        auth = self._sync_auth(hkey, endpoint)
+        # Ask the server first; this also yields the media USN the full transfer
+        # needs and surfaces auth/network errors before we tear the db down.
+        out = self.col.sync_collection(auth, sync_media=False)
+        server_usn = out.server_media_usn
+        self.col.close_for_full_sync()
+        try:
+            self.col.full_upload_or_download(
+                auth=auth, server_usn=server_usn, upload=upload
+            )
+        finally:
+            # Always re-open so the engine stays usable even if the transfer failed.
+            self.col.reopen(after_full_sync=True)
+        try:
+            self.col.sync_media(auth)
+        except Exception:
+            pass
+        return {"status": "ok", "direction": direction}
+
     def __enter__(self) -> "AnkiLibEngine":
         return self
 

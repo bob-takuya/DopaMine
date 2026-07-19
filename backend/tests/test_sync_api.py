@@ -65,6 +65,11 @@ class FakeSyncEngine:
         assert hkey == self.token
         return {"required": "NO_CHANGES"}
 
+    def sync_full(self, hkey: str, endpoint: str, direction: str):
+        assert hkey == self.token
+        assert direction in ("download", "upload")
+        return {"status": "ok", "direction": direction}
+
 
 def test_login_sync_status_and_state_never_expose_hkey(app_client):
     app, client = app_client

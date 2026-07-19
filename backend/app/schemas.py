@@ -25,6 +25,12 @@ class SyncLoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class SyncFullRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    # "download": AnkiWeb -> here (replace local). "upload": here -> AnkiWeb.
+    direction: Literal["download", "upload"]
+
+
 class ConfigUpdate(BaseModel):
     """Only guardrail / settings fields may be updated."""
 

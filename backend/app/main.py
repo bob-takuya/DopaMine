@@ -36,6 +36,7 @@ from app.schemas import (
     AnswerRequest,
     ConfigUpdate,
     SeedDemoRequest,
+    SyncFullRequest,
     SyncLoginRequest,
 )
 from app.services.review import ReviewCoordinator, project_state
@@ -200,7 +201,10 @@ def create_app() -> FastAPI:
         eng = engine()
         # Require the full sync capability, not just login, so no route can hit
         # a missing method and 500.
-        if not all(hasattr(eng, m) for m in ("sync_login", "sync", "sync_status")):
+        if not all(
+            hasattr(eng, m)
+            for m in ("sync_login", "sync", "sync_status", "sync_full")
+        ):
             raise ApiError(
                 501,
                 "SYNC_UNSUPPORTED",
@@ -358,6 +362,22 @@ def create_app() -> FastAPI:
                 new_endpoint = result.get("endpoint")
                 if new_endpoint and new_endpoint != auth["endpoint"]:
                     repo().set_sync_auth(auth["hkey"], new_endpoint)
+        except (SyncError, NetworkError) as exc:
+            raise ApiError(502, "SYNC_FAILED", str(exc)) from exc
+        return result
+
+    @app.post("/api/sync/full")
+    def sync_full(body: SyncFullRequest) -> dict[str, Any]:
+        # One-shot full sync that OVERWRITES one side. Used to bootstrap a fresh
+        # DopaMine collection from an existing AnkiWeb account ("download"), or to
+        # push local state up ("upload"). The client must confirm first.
+        eng = require_sync_engine()
+        auth = repo().get_sync_auth()
+        if auth is None:
+            raise ApiError(401, "SYNC_NOT_LOGGED_IN", "Log in to AnkiWeb first.")
+        try:
+            with coordinator().lock:
+                result = eng.sync_full(auth["hkey"], auth["endpoint"], body.direction)
         except (SyncError, NetworkError) as exc:
             raise ApiError(502, "SYNC_FAILED", str(exc)) from exc
         return result
