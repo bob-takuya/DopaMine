@@ -11,7 +11,7 @@ import { Hud } from "./components/hud.ts";
 import { effects } from "./effects.ts";
 import { Feed } from "./feed.ts";
 import { store } from "./store.ts";
-import type { DeckInfo, GuardrailPatch } from "./types.ts";
+import type { DeckInfo, GuardrailPatch, SyncDirection } from "./types.ts";
 
 const api = createApiClient();
 
@@ -508,7 +508,7 @@ function renderSyncLogin(body: HTMLElement): void {
   body.appendChild(form);
 }
 
-/** Logged-in: identity line + "Sync now" + "Log out". */
+/** Logged-in: identity line + "Sync now" + "Log out" + advanced bootstrap. */
 function renderSyncLoggedIn(body: HTMLElement, required?: string): void {
   body.replaceChildren();
 
@@ -521,7 +521,7 @@ function renderSyncLoggedIn(body: HTMLElement, required?: string): void {
     const req = document.createElement("p");
     req.className = "sync-note sync-note--warn";
     req.textContent =
-      "A full sync is required. Resolve it in the Anki desktop app — DopaMine won't auto-overwrite your collection.";
+      "AnkiWebと差分があり、通常の同期ができません。すでにAnki側にデッキがある場合は、下の「AnkiWebから取り込む」で学習データをこの端末に取り込めます。";
     body.appendChild(req);
   }
 
@@ -552,6 +552,104 @@ function renderSyncLoggedIn(body: HTMLElement, required?: string): void {
 
   row.append(syncBtn, logoutBtn);
   body.appendChild(row);
+
+  // ---- Advanced / bootstrap: wholesale full sync (OVERWRITES one side) ------
+  // Only shown when logged in on the Anki engine. Each button OVERWRITES an
+  // entire collection, so both require an explicit confirm() first. When a
+  // full sync is required we surface (and highlight) these prominently — a
+  // download is exactly how a user seeds DopaMine from an account with decks.
+  const adv = document.createElement("details");
+  adv.className = "sync-advanced";
+  if (required) adv.open = true; // surface prominently on full_sync_required
+  const summary = document.createElement("summary");
+  summary.className = "sync-advanced__summary";
+  summary.textContent = "Advanced / bootstrap";
+  adv.appendChild(summary);
+
+  const advNote = document.createElement("p");
+  advNote.className = "sync-note";
+  advNote.textContent =
+    "どちらか一方の内容でもう一方を丸ごと置き換えます。取り消せません。";
+  adv.appendChild(advNote);
+
+  const advRow = document.createElement("div");
+  advRow.className = "sync-actions";
+
+  const downloadBtn = document.createElement("button");
+  downloadBtn.className = "ghost-btn";
+  downloadBtn.type = "button";
+  downloadBtn.textContent = "⬇ AnkiWebから取り込む（ローカルを置き換え）";
+  downloadBtn.addEventListener("click", () => {
+    if (
+      !confirm(
+        "AnkiWebの内容でこの端末の学習データを置き換えます。ローカルの変更は失われます。よろしいですか？",
+      )
+    ) {
+      return;
+    }
+    void doSyncFull("download", downloadBtn, body);
+  });
+
+  const uploadBtn = document.createElement("button");
+  uploadBtn.className = "ghost-btn";
+  uploadBtn.type = "button";
+  uploadBtn.textContent = "⬆ ローカルをAnkiWebへ上書き";
+  uploadBtn.addEventListener("click", () => {
+    if (
+      !confirm(
+        "この端末の内容でAnkiWeb側のコレクションを置き換えます。AnkiWeb側の変更は失われます。よろしいですか？",
+      )
+    ) {
+      return;
+    }
+    void doSyncFull("upload", uploadBtn, body);
+  });
+
+  advRow.append(downloadBtn, uploadBtn);
+  adv.appendChild(advRow);
+  body.appendChild(adv);
+}
+
+/** Run POST /api/sync/full (a destructive, wholesale replace) and toast it. */
+async function doSyncFull(
+  direction: SyncDirection,
+  btn: HTMLButtonElement,
+  body: HTMLElement,
+): Promise<void> {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = direction === "download" ? "取り込み中…" : "上書き中…";
+  try {
+    await api.syncFull(direction);
+    store.setMock(api.isMock());
+    // Refresh authoritative state/decks so a freshly downloaded collection
+    // appears in the picker and HUD.
+    await bootData();
+    showToast(
+      direction === "download"
+        ? "AnkiWebから取り込みました"
+        : "AnkiWebへ上書きしました",
+      "success",
+    );
+    renderDeckPicker();
+    renderSyncLoggedIn(body);
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "SYNC_UNSUPPORTED") {
+      renderSyncUnsupported(body);
+      return;
+    }
+    if (err instanceof ApiError && err.code === "SYNC_NOT_LOGGED_IN") {
+      syncEndpoint = null;
+      showToast("Session expired — please log in again.", "error");
+      renderSyncLogin(body);
+      return;
+    }
+    // 502 SYNC_FAILED (and any other fault): surface the server's message.
+    const msg = err instanceof Error ? err.message : String(err);
+    showToast(`フルシンクに失敗しました: ${msg}`, "error");
+    btn.disabled = false;
+    btn.textContent = original ?? "";
+  }
 }
 
 /** Run POST /api/sync and toast the outcome per the contract. */
@@ -563,7 +661,7 @@ async function doSync(btn: HTMLButtonElement, body: HTMLElement): Promise<void> 
     const res = await api.sync();
     if (res.status === "full_sync_required") {
       showToast(
-        "Full sync required — open the Anki desktop app to resolve it. DopaMine won't auto-overwrite your collection.",
+        "フルシンクが必要です。すでにAnki側にデッキがあるなら「Advanced / bootstrap」の「⬇ AnkiWebから取り込む」で取り込めます。",
         "warning",
       );
       renderSyncLoggedIn(body, res.required || "full_sync_required");

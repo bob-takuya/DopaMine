@@ -46,6 +46,38 @@ test("mock: log in, reach synced state, and sync now shows a success toast", asy
   await expect(toast).toContainText(/Sync complete/i);
 });
 
+test("mock: full-sync download bootstrap confirms, toasts, and reloads decks", async ({
+  page,
+}) => {
+  // Auto-accept the destructive confirm() dialog before it appears.
+  page.on("dialog", (d) => void d.accept());
+
+  await page.goto("/?mock=1");
+
+  await page.getByRole("button", { name: /AnkiWeb Sync/i }).click();
+  const sheet = page.locator(".sync-sheet");
+  await expect(sheet).toBeVisible();
+
+  // Log in (mock accepts anything) to reach the logged-in view.
+  await sheet.locator('input[name="anki-username"]').fill("demo@example.com");
+  await sheet.locator('input[name="anki-password"]').fill("hunter2");
+  await sheet.getByRole("button", { name: /^Log in$/ }).click();
+  await expect(sheet.locator(".sync-note--ok")).toContainText(/Synced as/);
+
+  // Open the Advanced / bootstrap area and trigger a full download.
+  await sheet.getByText("Advanced / bootstrap").click();
+  const download = sheet.getByRole("button", {
+    name: /AnkiWebから取り込む/,
+  });
+  await expect(download).toBeVisible();
+  await download.click();
+
+  // Success toast for the download bootstrap.
+  const toast = page.locator(".toast--success");
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText(/AnkiWebから取り込みました/);
+});
+
 test("real backend (fsrs): sync panel shows the 'needs Anki engine' 501 note", async ({
   page,
 }) => {

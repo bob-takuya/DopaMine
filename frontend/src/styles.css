@@ -912,6 +912,27 @@ button {
   border-color: var(--danger);
   background: rgba(255, 84, 112, 0.12);
 }
+/* Advanced / bootstrap: collapsible destructive full-sync controls. */
+.sync-advanced {
+  margin-top: 4px;
+  border: 1px solid #23233c;
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sync-advanced__summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  list-style: revert;
+}
+.sync-advanced[open] .sync-advanced__summary {
+  color: var(--neon-gold);
+}
 
 /* ---- Particle canvas ---- */
 .fx-canvas {

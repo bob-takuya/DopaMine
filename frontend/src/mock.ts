@@ -23,6 +23,8 @@ import {
   type RewardEvent,
   type SeedDemoResponse,
   type StateResponse,
+  type SyncDirection,
+  type SyncFullResult,
   type SyncLoginResult,
   type SyncLogoutResult,
   type SyncResult,
@@ -276,6 +278,40 @@ class MockBackend {
       server_message: "mock sync",
       media: "started",
     };
+  }
+
+  /**
+   * Fake a wholesale full sync so ?mock=1 exercises the bootstrap flow. A
+   * "download" simulates pulling an AnkiWeb account down, REPLACING the local
+   * collection with its decks (so refreshed decks appear). An "upload" pushes
+   * local up and leaves the local collection untouched. Either way the mock is
+   * (and stays) logged in and considered fully synced afterwards.
+   */
+  async syncFull(direction: SyncDirection): Promise<SyncFullResult> {
+    this.syncLoggedIn = true;
+    if (direction === "download") {
+      // Replace local with a plausible "downloaded from AnkiWeb" collection.
+      const downloaded: Array<{ front: string; back: string }> = [
+        { front: "月", back: "moon" },
+        { front: "星", back: "star" },
+        { front: "海", back: "sea" },
+        { front: "花", back: "flower" },
+        { front: "雨", back: "rain" },
+        { front: "雪", back: "snow" },
+      ];
+      this.cards = downloaded.map((n, i) => ({
+        card_id: `ankiweb-${i + 1}`,
+        note_id: `ankiweb-note-${i + 1}`,
+        deck: "AnkiWeb::Bootstrap",
+        front_html: n.front,
+        back_html: n.back,
+        css: "",
+        tags: ["ankiweb"],
+        due_at: nowIso(),
+      }));
+      this.queue = this.cards.map((c) => c.card_id);
+    }
+    return { status: "ok", direction };
   }
 
   async syncLogout(): Promise<SyncLogoutResult> {

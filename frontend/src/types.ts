@@ -244,6 +244,19 @@ export interface SyncLogoutResult {
   ok: boolean;
 }
 
+/** Direction of a wholesale full sync (one side OVERWRITES the other). */
+export type SyncDirection = "download" | "upload";
+
+/**
+ * POST /api/sync/full -> 200. A full sync REPLACES one collection wholesale:
+ *  - "download" pulls AnkiWeb down, replacing the local (DopaMine) collection.
+ *  - "upload" pushes local up, replacing the server.
+ */
+export interface SyncFullResult {
+  status: string;
+  direction: SyncDirection;
+}
+
 /** Uniform error envelope: {"error":{"code","message"}}. */
 export interface ApiErrorEnvelope {
   error: {

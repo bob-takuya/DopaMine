@@ -20,6 +20,8 @@ import type {
   Rating,
   SeedDemoResponse,
   StateResponse,
+  SyncDirection,
+  SyncFullResult,
   SyncLoginResult,
   SyncLogoutResult,
   SyncResult,
@@ -73,6 +75,12 @@ export interface ApiClient {
   syncLogin(username: string, password: string): Promise<SyncLoginResult>;
   /** POST /api/sync — run an incremental sync against AnkiWeb. */
   sync(): Promise<SyncResult>;
+  /**
+   * POST /api/sync/full — a wholesale full sync that OVERWRITES one side:
+   * "download" replaces the local collection with AnkiWeb's, "upload" replaces
+   * the server with local. Destructive; callers MUST confirm before invoking.
+   */
+  syncFull(direction: SyncDirection): Promise<SyncFullResult>;
   /** POST /api/sync/logout — drop the server-side session. */
   syncLogout(): Promise<SyncLogoutResult>;
 }
@@ -338,6 +346,16 @@ class HttpApiClient implements ApiClient {
     return this.request<SyncResult>(`/api/sync`, {
       method: "POST",
       body: JSON.stringify({}),
+    });
+  }
+
+  async syncFull(direction: SyncDirection): Promise<SyncFullResult> {
+    if (this.mock) return mockApi.syncFull(direction);
+    // A wholesale replace can move the entire collection; give it a generous
+    // ceiling. Real HTTP faults (401/501/502) surface to the caller as ApiError.
+    return this.request<SyncFullResult>(`/api/sync/full`, {
+      method: "POST",
+      body: JSON.stringify({ direction }),
     });
   }
 
