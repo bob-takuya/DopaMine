@@ -14,6 +14,10 @@ class CardView:
     back_html: str
     tags: tuple[str, ...]
     due_at: datetime | None
+    # The note type's CSS (Anki model `css`, styling `.card` and friends). Empty
+    # when unknown. Media in front/back_html keeps original filenames; the API
+    # rewrites them to /api/media/<name> and serves via a MediaProvider engine.
+    css: str = ""
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,18 @@ class ImportSummary:
     decks: tuple[str, ...]
     notes_imported: int
     cards_imported: int
+
+
+class MediaProvider(Protocol):
+    """Optional capability: resolve a media file referenced by card HTML.
+
+    Card front/back HTML keeps the original Anki filename (e.g. ``dot.png``);
+    the API rewrites those references to ``/api/media/<name>`` and serves the
+    bytes by calling ``open_media(name)`` on the active engine. Returns ``None``
+    when the file is unknown. Implementations MUST reject path traversal.
+    """
+
+    def open_media(self, name: str) -> bytes | None: ...
 
 
 class ApkgImporter(Protocol):

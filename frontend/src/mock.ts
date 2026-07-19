@@ -115,6 +115,7 @@ class MockBackend {
           deck: DEMO_DECK,
           front_html: n.front,
           back_html: n.back,
+          css: "", // plain demo cards carry no custom note-type styling
           tags: n.tags,
           due_at: nowIso(),
         };
@@ -227,12 +228,16 @@ class MockBackend {
 
     this.importSeq += 1;
     const seq = this.importSeq;
+    // A small sample note-type CSS so ?mock=1 exercises the Shadow-DOM styling
+    // path (the real backend supplies each note type's actual CSS).
+    const sampleCss = ".card { background: #14142b; } .card__front { color: #7cf; }";
     const added: MockCard[] = notes.map((n, i) => ({
       card_id: `import-${seq}-${i + 1}`,
       note_id: `import-note-${seq}-${i + 1}`,
       deck,
       front_html: n.front,
       back_html: n.back,
+      css: sampleCss,
       tags: ["imported"],
       due_at: nowIso(),
     }));

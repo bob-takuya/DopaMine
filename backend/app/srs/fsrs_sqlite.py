@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS notes (
     model TEXT NOT NULL,
     fields_json TEXT NOT NULL,
     tags TEXT NOT NULL,
-    deck TEXT NOT NULL
+    deck TEXT NOT NULL,
+    css TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS cards (
     card_id TEXT PRIMARY KEY,
@@ -78,10 +79,30 @@ class FsrsSqliteEngine:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
+        self._media_dir = self.db_path.parent / "media"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._scheduler = Scheduler()
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(notes)")
+            }
+            if "css" not in columns:
+                connection.execute(
+                    "ALTER TABLE notes ADD COLUMN css TEXT NOT NULL DEFAULT ''"
+                )
+
+    def open_media(self, name: str) -> bytes | None:
+        """Return imported media by original filename, rejecting traversal."""
+        if not name or ".." in name or "/" in name or "\\" in name:
+            return None
+        try:
+            media_root = self._media_dir.resolve()
+            path = (self._media_dir / name).resolve()
+            path.relative_to(media_root)
+            return path.read_bytes()
+        except (OSError, ValueError):
+            return None
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -93,7 +114,7 @@ class FsrsSqliteEngine:
         now = _iso(_utc_now())
         query = """
             SELECT c.card_id, c.note_id, c.deck, c.due_at,
-                   n.model, n.fields_json, n.tags
+                   n.model, n.fields_json, n.tags, n.css
             FROM cards AS c
             JOIN notes AS n ON n.note_id = c.note_id
             WHERE c.due_at <= ?
@@ -120,6 +141,7 @@ class FsrsSqliteEngine:
             back_html=str(fields.get("Back", "")),
             tags=tuple(json.loads(row["tags"])),
             due_at=_datetime(row["due_at"]),
+            css=row["css"],
         )
 
     def answer_card(self, card_id: str, rating: Rating) -> AnswerResult:
@@ -177,6 +199,7 @@ class FsrsSqliteEngine:
         fields: Mapping[str, str],
         tags: Sequence[str] = (),
         model: str = "Basic",
+        css: str = "",
     ) -> Sequence[str]:
         if model != "Basic":
             raise ValueError(f"unsupported note model: {model}")
@@ -190,8 +213,8 @@ class FsrsSqliteEngine:
         card.due = now
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO notes(note_id, model, fields_json, tags, deck) VALUES (?, ?, ?, ?, ?)",
-                (note_id, model, json.dumps(dict(fields)), json.dumps(list(tags)), deck),
+                "INSERT INTO notes(note_id, model, fields_json, tags, deck, css) VALUES (?, ?, ?, ?, ?, ?)",
+                (note_id, model, json.dumps(dict(fields)), json.dumps(list(tags)), deck, css),
             )
             connection.execute(
                 """
@@ -205,9 +228,9 @@ class FsrsSqliteEngine:
     def import_apkg(self, apkg_path: str, into_deck: str | None = None) -> ImportSummary:
         """Import rendered notes from an Anki package.
 
-        Media files are not extracted, so media HTML (including ``<img>`` tags)
-        is retained as-is. Cloze notes pragmatically become one fallback card per
-        note, with every cloze ordinal hidden/revealed together.
+        Media HTML retains original filenames. Cloze notes pragmatically become
+        one fallback card per note, with every cloze ordinal hidden/revealed
+        together.
         """
 
         try:
@@ -231,6 +254,8 @@ class FsrsSqliteEngine:
             )
             if collection_name is None:
                 raise ValueError("Anki package contains no supported collection database")
+
+            self._extract_apkg_media(package, collection_name.endswith(".anki21b"))
 
             with tempfile.TemporaryDirectory(prefix="dopamine-apkg-") as temp_dir:
                 collection_path = Path(temp_dir) / "collection.sqlite3"
@@ -276,19 +301,63 @@ class FsrsSqliteEngine:
         cards_imported = 0
         for row in rows:
             fields = str(row["flds"]).split("\x1f")
-            front, back = self._render_apkg_note(models.get(str(row["mid"])), fields)
+            model = models.get(str(row["mid"]))
+            front, back = self._render_apkg_note(model, fields)
             original_deck = deck_names.get(str(row["did"])) if row["did"] is not None else None
             deck_name = into_deck or original_deck or "Imported"
             card_ids = self.add_note(
                 deck_name,
                 {"Front": front, "Back": back},
                 tags=str(row["tags"] or "").split(),
+                css=str(model.get("css", "")) if model else "",
             )
             imported_decks.add(deck_name)
             notes_imported += 1
             cards_imported += len(card_ids)
 
         return ImportSummary(tuple(sorted(imported_decks)), notes_imported, cards_imported)
+
+    def _extract_apkg_media(self, package: zipfile.ZipFile, modern: bool) -> None:
+        """Extract legacy JSON or modern protobuf media under safe original names."""
+        try:
+            media_bytes = package.read("media")
+        except (KeyError, OSError):
+            return
+
+        entries: list[tuple[str, str]] = []
+        try:
+            mapping = json.loads(media_bytes)
+            if isinstance(mapping, dict):
+                entries = [(str(stored), str(original)) for stored, original in mapping.items()]
+                modern = False
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+            try:
+                from anki.import_export_pb2 import MediaEntries
+
+                parsed = MediaEntries.FromString(media_bytes)
+                entries = [
+                    (str(entry.legacy_zip_filename), entry.name) for entry in parsed.entries
+                ]
+                modern = True
+            except (ImportError, TypeError, ValueError):
+                return
+
+        for stored_name, original_name in entries:
+            if (
+                not original_name
+                or ".." in original_name
+                or "/" in original_name
+                or "\\" in original_name
+            ):
+                continue
+            try:
+                contents = package.read(stored_name)
+                if modern:
+                    contents = zstandard.ZstdDecompressor().decompress(contents)
+                self._media_dir.mkdir(parents=True, exist_ok=True)
+                (self._media_dir / original_name).write_bytes(contents)
+            except (KeyError, OSError, zstandard.ZstdError):
+                continue
 
     @staticmethod
     def _apkg_models(connection: sqlite3.Connection) -> dict[str, dict[str, object]]:
@@ -298,11 +367,10 @@ class FsrsSqliteEngine:
             row = connection.execute("SELECT models FROM col LIMIT 1").fetchone()
             decoded = json.loads(row["models"]) if row is not None and row["models"] else {}
             if isinstance(decoded, dict):
-                models.update(
-                    (str(model_id), model)
-                    for model_id, model in decoded.items()
-                    if isinstance(model, dict)
-                )
+                for model_id, model in decoded.items():
+                    if isinstance(model, dict):
+                        model.setdefault("css", "")
+                        models[str(model_id)] = model
         except (sqlite3.Error, ValueError, TypeError):
             pass
         if models:
@@ -341,7 +409,17 @@ class FsrsSqliteEngine:
                 "type": model_type,
                 "flds": [],
                 "tmpls": [],
+                "css": "",
             }
+            if config_column:
+                try:
+                    from anki.notetypes_pb2 import Notetype
+
+                    config = Notetype.Config.FromString(row["config"])
+                    models[str(row["id"])]["type"] = config.kind
+                    models[str(row["id"])]["css"] = config.css
+                except (ImportError, TypeError, ValueError):
+                    pass
         if {"ntid", "ord", "name"}.issubset(field_columns):
             for row in connection.execute("SELECT ntid, ord, name FROM fields"):
                 model = models.get(str(row["ntid"]))

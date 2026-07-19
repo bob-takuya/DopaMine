@@ -18,6 +18,12 @@ export interface CardView {
   deck: string;
   front_html: string;
   back_html: string;
+  /**
+   * The note type's CSS (Anki's card template `.card { ... }` styling). Rendered
+   * inside a Shadow DOM so it cannot leak into the app chrome. The backend always
+   * sends it; it is "" for plain cards with no custom styling.
+   */
+  css: string;
   tags: string[];
   due_at: string | null; // ISO-8601 UTC
 }

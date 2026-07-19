@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import mimetypes
 import os
+import re
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.db import migrate
 from app.demo import run_seed
@@ -36,13 +39,67 @@ def _iso(value: datetime | None) -> Optional[str]:
     return value.astimezone(timezone.utc).isoformat()
 
 
+# Media references that already point somewhere absolute/external must not be
+# rewritten: remote URLs, protocol-relative URLs, inline data URIs, and refs we
+# have already rewritten to our own endpoint.
+_SKIP_MEDIA_PREFIXES = ("http://", "https://", "data:", "//", "/api/media")
+
+# `src="X"` / `src='X'` on any HTML tag (img/audio/video/source). Group 1 is the
+# opening quote char, group 2 the referenced value.
+_SRC_ATTR_RE = re.compile(r"""src\s*=\s*(["'])(.*?)\1""", re.IGNORECASE)
+# Anki's audio placeholder syntax: [sound:filename.mp3].
+_SOUND_RE = re.compile(r"\[sound:([^\]]+)\]")
+
+
+def _media_url(name: str) -> str:
+    """Backend URL that serves a media file by (URL-encoded) filename."""
+    return "/api/media/" + quote(name, safe="")
+
+
+def _should_rewrite(value: str) -> bool:
+    v = value.strip()
+    if not v:
+        return False
+    return not v.lower().startswith(_SKIP_MEDIA_PREFIXES)
+
+
+def rewrite_media_refs(html: str) -> str:
+    """Rewrite relative media references in card HTML to /api/media/<name>.
+
+    * ``src="dot.png"`` -> ``src="/api/media/dot.png"`` (img/audio/video/source).
+    * ``[sound:a.mp3]`` -> ``<audio controls src="/api/media/a.mp3"></audio>``.
+
+    Absolute/external/already-rewritten references (http(s)://, //, data:,
+    /api/media) are left untouched. Filenames are URL-encoded in the output.
+    """
+    if not html:
+        return html
+
+    def _sub_src(m: re.Match) -> str:
+        quote_char, value = m.group(1), m.group(2)
+        if not _should_rewrite(value):
+            return m.group(0)
+        return f"src={quote_char}{_media_url(value)}{quote_char}"
+
+    def _sub_sound(m: re.Match) -> str:
+        value = m.group(1)
+        if not _should_rewrite(value):
+            return m.group(0)
+        return f'<audio controls src="{_media_url(value)}"></audio>'
+
+    html = _SRC_ATTR_RE.sub(_sub_src, html)
+    html = _SOUND_RE.sub(_sub_sound, html)
+    return html
+
+
 def _card_dict(card: CardView) -> dict[str, Any]:
     return {
         "card_id": card.card_id,
         "note_id": card.note_id,
         "deck": card.deck,
-        "front_html": card.front_html,
-        "back_html": card.back_html,
+        "front_html": rewrite_media_refs(card.front_html),
+        "back_html": rewrite_media_refs(card.back_html),
+        "css": card.css,
         "tags": list(card.tags),
         "due_at": _iso(card.due_at),
     }
@@ -211,6 +268,30 @@ def create_app() -> FastAPI:
                 "cards": summary.cards_imported,
             }
         }
+
+    @app.get("/api/media/{name:path}")
+    def media(name: str) -> Response:
+        # Reject obvious traversal / absolute paths before hitting the engine.
+        if ".." in name or name.startswith("/"):
+            raise ApiError(400, "INVALID_MEDIA_NAME", "Invalid media name.")
+
+        eng = engine()
+        opener = getattr(eng, "open_media", None)
+        if opener is None:
+            raise ApiError(
+                404, "MEDIA_NOT_FOUND", "The active SRS engine has no media."
+            )
+
+        data = opener(name)
+        if data is None:
+            raise ApiError(404, "MEDIA_NOT_FOUND", f"No media file named {name!r}.")
+
+        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     @app.put("/api/config")
     def put_config(body: ConfigUpdate) -> dict[str, Any]:

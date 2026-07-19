@@ -26,6 +26,7 @@ across threads without external mutual exclusion.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -108,17 +109,51 @@ class AnkiLibEngine:
 
     def _card_view(self, card) -> CardView:
         note = card.note()
+        # The note type's CSS (styles `.card` and friends). ``card.note_type()``
+        # returns the model dict; its ``css`` key is the raw stylesheet string.
+        note_type = card.note_type()
+        css = note_type["css"] if note_type is not None else ""
         return CardView(
             card_id=str(card.id),
             note_id=str(note.id),
             deck=self.col.decks.name(card.did),
             # card.question()/answer() render the full Anki HTML (with the note
-            # type's <style>), which is exactly what the feed shows.
+            # type's <style>), which is exactly what the feed shows. Media <img>
+            # tags keep their original filenames; the API rewrites them to
+            # /api/media/<name> and serves the bytes via open_media().
             front_html=card.question(),
             back_html=card.answer(),
             tags=tuple(note.tags),
             due_at=self._due_at(card),
+            css=css,
         )
+
+    # ------------------------------------------------------------------ #
+    # MediaProvider capability
+    # ------------------------------------------------------------------ #
+    def open_media(self, name: str) -> bytes | None:
+        """Return the bytes of a media file referenced by card HTML, or None.
+
+        Reads ``<col.media.dir()>/<basename(name)>``. Only the basename is used
+        and the resolved path is verified to stay inside the media directory, so
+        path-traversal inputs (e.g. ``../secret``) resolve to nothing and yield
+        ``None`` rather than escaping the media folder. Imported packages copy
+        their media into this directory (via ``import_anki_package``), so imported
+        images resolve here automatically.
+        """
+        base = os.path.basename(name)
+        if not base or base in (".", ".."):
+            return None
+        media_dir = Path(self.col.media.dir()).resolve()
+        target = (media_dir / base).resolve()
+        # Defence in depth: the resolved file must live directly inside the
+        # media directory.
+        if target.parent != media_dir:
+            return None
+        try:
+            return target.read_bytes()
+        except (FileNotFoundError, IsADirectoryError, OSError):
+            return None
 
     def _next_card_for_deck(self, deck_id: int):
         """Return the top scheduler card for ``deck_id`` (and its subdecks), or None.

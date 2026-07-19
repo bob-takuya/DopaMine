@@ -15,6 +15,39 @@ export interface CardCallbacks {
 
 const RATING_ORDER: Rating[] = [1, 2, 3, 4];
 
+// Base styling injected INTO the card's shadow root so plain cards (css === "")
+// still look like DopaMine cards. Custom properties (var(--...)) inherit across
+// the shadow boundary from :root, so the neon palette carries through. The note
+// type's own CSS is appended AFTER this block so it can override any of it
+// (e.g. a `.card` background, `.word` color, or `img` max-width).
+const SHADOW_BASE_CSS = `
+  :host { display: flex; flex: 1; min-width: 0; }
+  .card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 14px;
+    text-align: center;
+    color: inherit;
+  }
+  .card__front { font-size: clamp(40px, 14vw, 88px); font-weight: 900; line-height: 1.05; }
+  .card__divider { width: 44%; border: none; border-top: 2px dashed #3a3a5c; margin: 6px 0; }
+  .card__back { font-size: clamp(24px, 7vw, 40px); font-weight: 700; color: var(--neon-lime, #c6ff4a); animation: pop 0.28s ease; }
+  img { max-width: 100%; height: auto; }
+  @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+`;
+
+/** Build the inner face markup (front, optional divider + back) as an HTML string. */
+function faceInnerHtml(card: CardView, phase: Phase): string {
+  let html = `<div class="card__front">${card.front_html}</div>`;
+  if (phase === "answer") {
+    html += `<hr class="card__divider" /><div class="card__back">${card.back_html}</div>`;
+  }
+  return html;
+}
+
 export class CardComponent {
   readonly el: HTMLElement;
   private card: CardView;
@@ -124,6 +157,31 @@ export class CardComponent {
     });
   }
 
+  /**
+   * Render the card's Anki HTML into `face` with STYLE ISOLATION.
+   *
+   * The note type's CSS targets bare selectors (`.card`, `img`, `.word`, ...) and
+   * must not leak into the DopaMine app chrome — and the app's own CSS must not
+   * fight it. So the answer/question HTML lives in a Shadow DOM: the note CSS is
+   * scoped to the shadow tree, and only inheritable properties / custom props
+   * cross the boundary. The grade buttons, deck tag, and tags stay in the LIGHT
+   * DOM (built by render()) so the app styles them normally. Images inside the
+   * shadow load from /api/media/... like any other <img>.
+   *
+   * Defensive: if attachShadow is unavailable or throws, fall back to the prior
+   * plain-innerHTML rendering so the card still shows (without CSS isolation).
+   */
+  private renderFace(face: HTMLElement): void {
+    const inner = faceInnerHtml(this.card, this.phase);
+    try {
+      const root = face.shadowRoot ?? face.attachShadow({ mode: "open" });
+      root.innerHTML = `<style>${SHADOW_BASE_CSS}\n${this.card.css ?? ""}</style><div class="card">${inner}</div>`;
+    } catch {
+      // Shadow DOM unsupported/blocked: previous behavior (no isolation).
+      face.innerHTML = inner;
+    }
+  }
+
   private render(): void {
     this.el.innerHTML = "";
 
@@ -134,22 +192,7 @@ export class CardComponent {
 
     const face = document.createElement("div");
     face.className = "card__face";
-
-    const front = document.createElement("div");
-    front.className = "card__front";
-    front.innerHTML = this.card.front_html;
-    face.appendChild(front);
-
-    if (this.phase === "answer") {
-      const divider = document.createElement("hr");
-      divider.className = "card__divider";
-      face.appendChild(divider);
-
-      const back = document.createElement("div");
-      back.className = "card__back";
-      back.innerHTML = this.card.back_html;
-      face.appendChild(back);
-    }
+    this.renderFace(face);
     this.el.appendChild(face);
 
     if (this.card.tags.length) {
