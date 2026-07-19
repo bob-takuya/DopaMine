@@ -403,25 +403,45 @@ class FsrsSqliteEngine:
         except (AttributeError, TypeError, ValueError):
             return fallback
 
-    @staticmethod
-    def _render_template(template: str, fields: Mapping[str, str]) -> str:
-        section = re.compile(r"{{([#^])\s*([^{}]+?)\s*}}(.*?){{/\s*\2\s*}}", re.DOTALL)
-        while True:
-            rendered, count = section.subn(
-                lambda match: match.group(3)
-                if bool(fields.get(match.group(2).strip(), "")) == (match.group(1) == "#")
-                else "",
-                template,
-            )
-            template = rendered
-            if not count:
-                break
-        template = re.sub(
-            r"{{\s*([^{}]+?)\s*}}",
-            lambda match: str(fields.get(match.group(1).strip(), "")),
-            template,
-        )
-        return template
+    # One left-to-right pass over the template. A stack of open sections means
+    # nesting is handled by innermost-close (so nested same-field conditionals
+    # pair correctly), and there is no regex backtracking on malformed input.
+    _TOKEN_RE = re.compile(r"{{(.*?)}}", re.DOTALL)
+
+    @classmethod
+    def _render_template(cls, template: str, fields: Mapping[str, str]) -> str:
+        root: list[str] = []
+        stack: list[tuple[bool, list[str]]] = []  # (section active?, buffer)
+
+        def buf() -> list[str]:
+            return stack[-1][1] if stack else root
+
+        pos = 0
+        for match in cls._TOKEN_RE.finditer(template):
+            if match.start() > pos:
+                buf().append(template[pos:match.start()])
+            pos = match.end()
+            inner = match.group(1).strip()
+            if not inner:
+                continue
+            marker = inner[0]
+            if marker in "#^":  # open positive / inverted section
+                name = inner[1:].strip()
+                truthy = bool(fields.get(name, ""))
+                stack.append((truthy if marker == "#" else not truthy, []))
+            elif marker == "/":  # close innermost section
+                if stack:
+                    active, section = stack.pop()
+                    buf().append("".join(section) if active else "")
+                # a stray close with no open section is ignored
+            else:  # field / {{FrontSide}} / unknown tag -> value or ""
+                buf().append(str(fields.get(inner, "")))
+        if pos < len(template):
+            buf().append(template[pos:])
+        while stack:  # tolerate unclosed sections rather than dropping content
+            active, section = stack.pop()
+            buf().append("".join(section) if active else "")
+        return "".join(root)
 
     @classmethod
     def _render_cloze(
