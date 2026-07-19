@@ -17,3 +17,5 @@ orchestration/*_log.txt
 frontend/test-results/
 frontend/playwright-report/
 frontend/.playwright/
+
+backend/data/
