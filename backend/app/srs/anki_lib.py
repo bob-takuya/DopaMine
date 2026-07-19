@@ -194,6 +194,16 @@ class AnkiLibEngine:
         if card.queue < 0:
             raise ValueError(f"card {card_id} is not currently answerable")
 
+        # "Currently answerable" guard: a card scheduled for the future (e.g. a
+        # card that was *just* answered and pushed to a learning step, or a review
+        # card not yet due) must not be graded. This enforces the SRS contract and
+        # closes the recovery/replay double-answer window: after a real answer the
+        # card's due moves forward, so a re-grade of the same review is rejected
+        # here instead of silently advancing the scheduler twice.
+        due_now = self._due_at(card)
+        if due_now is not None and due_now > datetime.now(timezone.utc):
+            raise ValueError(f"card {card_id} is not currently due")
+
         # SchedulingStates for this exact card — the same data get_queued_cards
         # carries, fetched here so we can grade a card addressed by id.
         states = self.col._backend.get_scheduling_states(cid)

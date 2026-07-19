@@ -140,6 +140,7 @@ class MockBackend {
       inventory: { ...this.state.inventory },
       reviews_today: this.state.reviews_today,
       session_started_at: this.sessionStart,
+      session_review_count: this.state.reviews_today,
       version: this.state.version,
     };
   }

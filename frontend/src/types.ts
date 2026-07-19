@@ -109,6 +109,7 @@ export interface PlayerState {
   inventory: Record<string, number>;
   reviews_today: number; // derived projection
   session_started_at?: string | null;
+  session_review_count: number;
   version: number;
 }
 

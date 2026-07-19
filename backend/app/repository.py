@@ -168,6 +168,26 @@ class Repository:
             no_dark_pattern_mode=bool(cfg["no_dark_pattern_mode"]),
         )
 
+    def reviews_today_count(self) -> int:
+        """Reviews recorded on *today's* local calendar day (configured tz).
+
+        Derived from the reviews table by ``local_date`` rather than a running
+        session counter, so it stays correct across a local-date rollover.
+        """
+        from zoneinfo import ZoneInfo
+
+        cfg = self.get_config()
+        try:
+            tz = ZoneInfo(cfg["timezone"])
+        except Exception:
+            tz = timezone.utc
+        today = datetime.now(tz).date().isoformat()
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM reviews WHERE local_date = ?", (today,)
+            ).fetchone()
+        return int(row["n"]) if row is not None else 0
+
     # ----- reviews -------------------------------------------------------
     def get_review(self, review_id: str) -> ReviewRow | None:
         with self._conn() as conn:

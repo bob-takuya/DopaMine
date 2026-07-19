@@ -29,8 +29,13 @@ def _iso(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat()
 
 
-def project_state(state: PlayerState) -> dict[str, Any]:
-    """Project canonical player state into the API response shape."""
+def project_state(state: PlayerState, reviews_today: int | None = None) -> dict[str, Any]:
+    """Project canonical player state into the API response shape.
+
+    ``reviews_today`` is a local-date-accurate count supplied by the caller
+    (from the reviews table); it falls back to the session counter only when a
+    count is not available.
+    """
     return {
         "total_xp": state.total_xp,
         "level": state.level,
@@ -39,7 +44,7 @@ def project_state(state: PlayerState) -> dict[str, Any]:
         "rare_pity": state.rare_pity,
         "legendary_pity": state.legendary_pity,
         "inventory": dict(state.inventory),
-        "reviews_today": state.session_review_count,
+        "reviews_today": state.session_review_count if reviews_today is None else reviews_today,
         "session_started_at": _iso(state.session_started_at),
         "session_review_count": state.session_review_count,
         "version": state.version,
@@ -92,7 +97,7 @@ class ReviewCoordinator:
             "review_id": review_id,
             "srs": _srs_dict(result),
             "rewards": _rewards_list(events),
-            "state": project_state(state),
+            "state": project_state(state, self.repo.reviews_today_count()),
         }
 
     def _stamp_events(self, review_id: str, events: list[RewardEvent]) -> list[RewardEvent]:

@@ -140,7 +140,7 @@ def create_app() -> FastAPI:
     def state() -> dict[str, Any]:
         player = repo().load_state()
         return {
-            "state": project_state(player),
+            "state": project_state(player, repo().reviews_today_count()),
             "guardrails": repo().get_config(),
             "srs": _stats_dict(engine().stats()),
         }

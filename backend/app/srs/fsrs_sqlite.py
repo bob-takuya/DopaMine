@@ -163,7 +163,7 @@ class FsrsSqliteEngine:
             rating=rating,
             answered_at=answered_at,
             next_due_at=due,
-            interval_days=float((due - answered_at).days),
+            interval_days=(due - answered_at).total_seconds() / 86400.0,
         )
 
     def add_note(
