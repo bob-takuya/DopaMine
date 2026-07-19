@@ -27,12 +27,27 @@ Tokyo (`nrt`), 512 MB, HTTPS forced, and auto-stop/start (no cost while idle).
 ## Option B — Railway (simplest dashboard flow)
 
 1. New Project → **Deploy from GitHub repo** (or `railway up` with the CLI).
-   Railway detects the `Dockerfile` (`railway.json` pins it) and injects `$PORT`
-   (the image honours it).
-2. **Variables**: `DOPAMINE_SERVER_SECRET` = a random string.
-   (`DOPAMINE_SRS_ENGINE=fsrs` and `DOPAMINE_DATA_DIR=/data` are baked in.)
+   Railway detects the `Dockerfile` (`railway.json` pins it).
+2. **Variables**: set
+   - `DOPAMINE_SERVER_SECRET` = a random string
+   - `DOPAMINE_SRS_ENGINE` = `anki` (needed for AnkiWeb sync) or `fsrs`
+   - **`PORT` = `8000`**  ← IMPORTANT (see gotcha below)
+   (`DOPAMINE_DATA_DIR=/data` is baked in.)
 3. **Add a Volume** mounted at `/data` (Settings → Volumes) so progress persists.
 4. Generate a domain → open the `https://…up.railway.app` URL on your phone.
+
+### Two Railway gotchas we hit (both fixed / documented)
+- **Volume permissions → "TLS ok but curl 000".** Railway mounts `/data`
+  root-owned, so a non-root process can't create the SQLite files and uvicorn
+  exits before listening. The image now **runs as root** (fixed in `Dockerfile`),
+  so this is handled. (Alternative: set `RAILWAY_RUN_UID=0`.)
+- **Domain target-port mismatch → also "curl 000".** Railway derives the public
+  domain's *target port* from the Dockerfile `EXPOSE` (8000) but *injects* a
+  different `PORT` (e.g. 8080); the app listens on the injected port, so the
+  domain routes to a dead port and hangs. **Fix: set the service variable
+  `PORT=8000`** so the app and the domain agree (or set the domain's target port
+  to match the injected `PORT`). Verify in the deploy logs:
+  `Uvicorn running on http://0.0.0.0:8000`.
 
 ## Option C — any Docker host / your own box
 
