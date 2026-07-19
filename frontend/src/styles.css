@@ -224,6 +224,11 @@ button {
   border: 1px solid var(--danger);
   color: #ffd0da;
 }
+.toast--warning {
+  background: rgba(255, 210, 63, 0.14);
+  border: 1px solid var(--neon-gold);
+  color: #ffe9a6;
+}
 
 /* ---- App shell / feed ---- */
 .app-shell {
@@ -842,6 +847,70 @@ button {
 }
 .sheet__transparency b {
   color: var(--neon-lime);
+}
+
+/* ---- AnkiWeb sync panel ---- */
+.sync-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sync-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sync-input {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid #33334f;
+  border-radius: 12px;
+  padding: 13px 14px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.sync-input::placeholder {
+  color: var(--muted);
+}
+.sync-input:focus {
+  outline: none;
+  border-color: var(--neon-cyan);
+}
+.sync-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sync-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid #23233c;
+}
+.sync-note--info {
+  color: var(--neon-cyan);
+  border-color: rgba(36, 224, 255, 0.4);
+  background: rgba(36, 224, 255, 0.08);
+}
+.sync-note--ok {
+  color: var(--ok);
+  border-color: rgba(41, 224, 160, 0.4);
+  background: rgba(41, 224, 160, 0.08);
+  font-weight: 700;
+}
+.sync-note--warn {
+  color: var(--neon-gold);
+  border-color: rgba(255, 210, 63, 0.4);
+  background: rgba(255, 210, 63, 0.08);
+}
+.sync-note--error {
+  color: #ffd0da;
+  border-color: var(--danger);
+  background: rgba(255, 84, 112, 0.12);
 }
 
 /* ---- Particle canvas ---- */

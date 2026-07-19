@@ -20,6 +20,10 @@ import type {
   Rating,
   SeedDemoResponse,
   StateResponse,
+  SyncLoginResult,
+  SyncLogoutResult,
+  SyncResult,
+  SyncStatus,
 } from "./types.ts";
 import { mockApi } from "./mock.ts";
 
@@ -52,6 +56,19 @@ export interface ApiClient {
   putConfig(patch: GuardrailPatch): Promise<ConfigResponse>;
   /** Upload an .apkg, returning the import summary. */
   importApkg(file: File): Promise<ImportSummary>;
+
+  // ---- AnkiWeb sync -------------------------------------------------------
+  /** GET /api/sync/status. 501 SYNC_UNSUPPORTED under the FSRS engine. */
+  syncStatus(): Promise<SyncStatus>;
+  /**
+   * POST /api/sync/login. The password is sent exactly once here and is never
+   * retained, logged, or persisted by the client.
+   */
+  syncLogin(username: string, password: string): Promise<SyncLoginResult>;
+  /** POST /api/sync — run an incremental sync against AnkiWeb. */
+  sync(): Promise<SyncResult>;
+  /** POST /api/sync/logout — drop the server-side session. */
+  syncLogout(): Promise<SyncLogoutResult>;
 }
 
 interface ApiClientOptions {
@@ -289,6 +306,41 @@ class HttpApiClient implements ApiClient {
       throw new ApiError(code, message, res.status);
     }
     return (body as ImportResponse).imported;
+  }
+
+  // ---- AnkiWeb sync -------------------------------------------------------
+
+  async syncStatus(): Promise<SyncStatus> {
+    // GET: fall back to the mock on a network-level failure, but let real HTTP
+    // faults (notably 501 SYNC_UNSUPPORTED under the FSRS engine) surface.
+    return this.getWithFallback(`/api/sync/status`, () => mockApi.syncStatus());
+  }
+
+  async syncLogin(username: string, password: string): Promise<SyncLoginResult> {
+    if (this.mock) return mockApi.syncLogin();
+    // The password lives only for the duration of this single request body. We
+    // never store it, log it, or keep a reference beyond this call.
+    return this.request<SyncLoginResult>(`/api/sync/login`, {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+  }
+
+  async sync(): Promise<SyncResult> {
+    if (this.mock) return mockApi.sync();
+    // A collection sync can take a while; give it a more generous ceiling.
+    return this.request<SyncResult>(`/api/sync`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  async syncLogout(): Promise<SyncLogoutResult> {
+    if (this.mock) return mockApi.syncLogout();
+    return this.request<SyncLogoutResult>(`/api/sync/logout`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   }
 }
 

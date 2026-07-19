@@ -19,6 +19,11 @@ class SeedDemoRequest(BaseModel):
     replace: bool = False
 
 
+class SyncLoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
 class ConfigUpdate(BaseModel):
     """Only guardrail / settings fields may be updated."""
 

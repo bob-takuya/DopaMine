@@ -23,6 +23,10 @@ import {
   type RewardEvent,
   type SeedDemoResponse,
   type StateResponse,
+  type SyncLoginResult,
+  type SyncLogoutResult,
+  type SyncResult,
+  type SyncStatus,
 } from "./types.ts";
 import { makeReviewId } from "./api.ts";
 
@@ -250,6 +254,33 @@ class MockBackend {
   async putConfig(patch: GuardrailPatch): Promise<ConfigResponse> {
     this.config = { ...this.config, ...patch };
     return { config: { ...this.config } };
+  }
+
+  // ---- AnkiWeb sync (happy-path fake so ?mock=1 exercises the flow) --------
+
+  private syncLoggedIn = false;
+
+  async syncStatus(): Promise<SyncStatus> {
+    return { logged_in: this.syncLoggedIn };
+  }
+
+  async syncLogin(): Promise<SyncLoginResult> {
+    this.syncLoggedIn = true;
+    return { ok: true, endpoint: "AnkiWeb (mock)" };
+  }
+
+  async sync(): Promise<SyncResult> {
+    return {
+      status: "ok",
+      required: "no_changes",
+      server_message: "mock sync",
+      media: "started",
+    };
+  }
+
+  async syncLogout(): Promise<SyncLogoutResult> {
+    this.syncLoggedIn = false;
+    return { ok: true };
   }
 
   private rollLoot(rng: () => number): {

@@ -32,6 +32,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 # Fields that PUT /api/config is allowed to mutate.
 CONFIG_KEYS = tuple(DEFAULT_CONFIG.keys())
 
+_SYNC_HKEY_KEY = "_ankiweb_hkey"
+_SYNC_ENDPOINT_KEY = "_ankiweb_endpoint"
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -160,6 +163,43 @@ class Repository:
                     (key, json.dumps(value), now),
                 )
         return self.get_config()
+
+    def set_sync_auth(self, hkey: str, endpoint: str) -> None:
+        now = _now_iso()
+        with self._conn() as conn:
+            for key, value in (
+                (_SYNC_HKEY_KEY, hkey),
+                (_SYNC_ENDPOINT_KEY, endpoint),
+            ):
+                conn.execute(
+                    """
+                    INSERT INTO config (key, value_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value_json=excluded.value_json,
+                        updated_at=excluded.updated_at
+                    """,
+                    (key, json.dumps(value), now),
+                )
+
+    def get_sync_auth(self) -> dict[str, str] | None:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT key, value_json FROM config WHERE key IN (?, ?)",
+                (_SYNC_HKEY_KEY, _SYNC_ENDPOINT_KEY),
+            ).fetchall()
+        values = {row["key"]: json.loads(row["value_json"]) for row in rows}
+        hkey = values.get(_SYNC_HKEY_KEY)
+        if not hkey:
+            return None
+        return {"hkey": hkey, "endpoint": values.get(_SYNC_ENDPOINT_KEY, "")}
+
+    def clear_sync_auth(self) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM config WHERE key IN (?, ?)",
+                (_SYNC_HKEY_KEY, _SYNC_ENDPOINT_KEY),
+            )
 
     def reward_config(self) -> RewardConfig:
         cfg = self.get_config()

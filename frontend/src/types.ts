@@ -204,6 +204,46 @@ export interface ImportResponse {
   imported: ImportSummary;
 }
 
+// ---- AnkiWeb sync ----------------------------------------------------------
+//
+// The backend NEVER returns the AnkiWeb session token (hkey) to the client; it
+// keeps it server-side. The UI only ever sees these projections. Under the
+// FSRS fallback engine every sync route returns 501 SYNC_UNSUPPORTED.
+
+/** GET /api/sync/status */
+export interface SyncStatus {
+  logged_in: boolean;
+  /** Present when the server flags a full sync is required (e.g. "full_sync_required"). */
+  required?: string;
+}
+
+/** POST /api/sync/login request body. Password is sent ONCE and never stored. */
+export interface SyncLoginRequest {
+  username: string;
+  password: string;
+}
+
+/** POST /api/sync/login -> 200. No hkey is ever included. */
+export interface SyncLoginResult {
+  ok: boolean;
+  /** The AnkiWeb sync endpoint the session is bound to (display only). */
+  endpoint: string;
+}
+
+/** POST /api/sync -> 200. */
+export interface SyncResult {
+  status: "ok" | "no_changes" | "full_sync_required";
+  required?: string;
+  server_message?: string;
+  /** "started" once media sync kicks off in the background. */
+  media?: string;
+}
+
+/** POST /api/sync/logout -> {ok:true}. */
+export interface SyncLogoutResult {
+  ok: boolean;
+}
+
 /** Uniform error envelope: {"error":{"code","message"}}. */
 export interface ApiErrorEnvelope {
   error: {

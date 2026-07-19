@@ -166,7 +166,13 @@ function renderDeckPicker(): void {
   settingsBtn.textContent = "⚙ Settings & guardrails";
   settingsBtn.addEventListener("click", () => openSettings());
 
-  actions.append(seedBtn, importLabel, allBtn, settingsBtn);
+  const syncBtn = document.createElement("button");
+  syncBtn.className = "ghost-btn";
+  syncBtn.type = "button";
+  syncBtn.textContent = "☁ AnkiWeb Sync";
+  syncBtn.addEventListener("click", () => openSync());
+
+  actions.append(seedBtn, importLabel, allBtn, settingsBtn, syncBtn);
   wrap.appendChild(actions);
 
   if (snap.mock) {
@@ -340,6 +346,255 @@ function openSettings(): void {
   document.body.appendChild(backdrop);
 }
 
+// ---- AnkiWeb sync panel ---------------------------------------------------
+//
+// Opened from the deck picker's "☁ AnkiWeb Sync" button. The password is only
+// ever held in the live <input> and the single login POST — it is never stored,
+// logged, echoed back, or written to localStorage/IndexedDB.
+
+// Last known sync endpoint label (display only). Kept in memory for the life of
+// the tab; deliberately NOT persisted. The server never returns the hkey.
+let syncEndpoint: string | null = null;
+
+function openSync(): void {
+  const backdrop = document.createElement("div");
+  backdrop.className = "sheet-backdrop";
+  const sheet = document.createElement("div");
+  sheet.className = "sheet sync-sheet";
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-label", "AnkiWeb sync");
+
+  const h = document.createElement("h2");
+  h.textContent = "☁ AnkiWeb Sync";
+  sheet.appendChild(h);
+
+  const note = document.createElement("p");
+  note.className = "sheet__note";
+  note.textContent =
+    "Sync your progress back to the real Anki apps. Your password is sent once to log in and is never stored in the browser.";
+  sheet.appendChild(note);
+
+  const body = document.createElement("div");
+  body.className = "sync-body";
+  sheet.appendChild(body);
+
+  const close = document.createElement("button");
+  close.className = "primary-btn";
+  close.type = "button";
+  close.textContent = "Done";
+  close.addEventListener("click", () => backdrop.remove());
+  sheet.appendChild(close);
+
+  backdrop.appendChild(sheet);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) backdrop.remove();
+  });
+  document.body.appendChild(backdrop);
+
+  void refreshSync(body);
+}
+
+/** Fetch status and render the correct sub-view (unsupported / login / synced). */
+async function refreshSync(body: HTMLElement): Promise<void> {
+  body.replaceChildren();
+  const loading = document.createElement("p");
+  loading.className = "sync-note";
+  loading.textContent = "Checking sync status…";
+  body.appendChild(loading);
+
+  try {
+    const status = await api.syncStatus();
+    if (status.logged_in) {
+      renderSyncLoggedIn(body, status.required);
+    } else {
+      renderSyncLogin(body);
+    }
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "SYNC_UNSUPPORTED") {
+      renderSyncUnsupported(body);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    body.replaceChildren();
+    const p = document.createElement("p");
+    p.className = "sync-note sync-note--error";
+    p.textContent = `Could not check sync status: ${msg}`;
+    body.appendChild(p);
+  }
+}
+
+/** 501 SYNC_UNSUPPORTED: no form — an informational note instead of a scary error. */
+function renderSyncUnsupported(body: HTMLElement): void {
+  body.replaceChildren();
+  const p = document.createElement("p");
+  p.className = "sync-note sync-note--info";
+  p.textContent =
+    "Sync needs the Anki engine. Start the backend with DOPAMINE_SRS_ENGINE=anki and a real collection.";
+  body.appendChild(p);
+}
+
+/** Logged-out: a small AnkiWeb login form. */
+function renderSyncLogin(body: HTMLElement): void {
+  body.replaceChildren();
+
+  const form = document.createElement("form");
+  form.className = "sync-form";
+  form.setAttribute("autocomplete", "off");
+
+  const userInput = document.createElement("input");
+  userInput.type = "text";
+  userInput.className = "sync-input";
+  userInput.name = "anki-username";
+  userInput.placeholder = "AnkiWeb email";
+  userInput.autocomplete = "off";
+  userInput.setAttribute("aria-label", "AnkiWeb email");
+
+  const passInput = document.createElement("input");
+  passInput.type = "password";
+  passInput.className = "sync-input";
+  passInput.name = "anki-password";
+  passInput.placeholder = "Password";
+  passInput.autocomplete = "off";
+  passInput.setAttribute("aria-label", "AnkiWeb password");
+
+  const errEl = document.createElement("p");
+  errEl.className = "sync-note sync-note--error";
+  errEl.hidden = true;
+
+  const submit = document.createElement("button");
+  submit.className = "primary-btn";
+  submit.type = "submit";
+  submit.textContent = "Log in";
+
+  const showErr = (m: string): void => {
+    errEl.textContent = m;
+    errEl.hidden = false;
+  };
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errEl.hidden = true;
+    const username = userInput.value.trim();
+    const password = passInput.value;
+    if (!username || !password) {
+      showErr("Enter your AnkiWeb email and password.");
+      return;
+    }
+    submit.disabled = true;
+    submit.textContent = "Logging in…";
+    try {
+      const res = await api.syncLogin(username, password);
+      syncEndpoint = res.endpoint || null;
+      // Never keep the password around after the request resolves.
+      passInput.value = "";
+      showToast(`Logged in to ${res.endpoint || "AnkiWeb"}`, "success");
+      store.setMock(api.isMock());
+      renderSyncLoggedIn(body);
+    } catch (err) {
+      // Clear the password regardless of outcome; never render it back.
+      passInput.value = "";
+      if (err instanceof ApiError && err.code === "SYNC_UNSUPPORTED") {
+        renderSyncUnsupported(body);
+        return;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      showErr(msg);
+      submit.disabled = false;
+      submit.textContent = "Log in";
+    }
+  });
+
+  form.append(userInput, passInput, errEl, submit);
+  body.appendChild(form);
+}
+
+/** Logged-in: identity line + "Sync now" + "Log out". */
+function renderSyncLoggedIn(body: HTMLElement, required?: string): void {
+  body.replaceChildren();
+
+  const who = document.createElement("p");
+  who.className = "sync-note sync-note--ok";
+  who.textContent = `Synced as ${syncEndpoint || "AnkiWeb"}`;
+  body.appendChild(who);
+
+  if (required) {
+    const req = document.createElement("p");
+    req.className = "sync-note sync-note--warn";
+    req.textContent =
+      "A full sync is required. Resolve it in the Anki desktop app — DopaMine won't auto-overwrite your collection.";
+    body.appendChild(req);
+  }
+
+  const row = document.createElement("div");
+  row.className = "sync-actions";
+
+  const syncBtn = document.createElement("button");
+  syncBtn.className = "primary-btn";
+  syncBtn.type = "button";
+  syncBtn.textContent = "Sync now";
+  syncBtn.addEventListener("click", () => void doSync(syncBtn, body));
+
+  const logoutBtn = document.createElement("button");
+  logoutBtn.className = "ghost-btn";
+  logoutBtn.type = "button";
+  logoutBtn.textContent = "Log out";
+  logoutBtn.addEventListener("click", async () => {
+    logoutBtn.disabled = true;
+    try {
+      await api.syncLogout();
+    } catch {
+      /* best-effort: drop the local view even if the call failed */
+    }
+    syncEndpoint = null;
+    showToast("Logged out of AnkiWeb", "success");
+    renderSyncLogin(body);
+  });
+
+  row.append(syncBtn, logoutBtn);
+  body.appendChild(row);
+}
+
+/** Run POST /api/sync and toast the outcome per the contract. */
+async function doSync(btn: HTMLButtonElement, body: HTMLElement): Promise<void> {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Syncing…";
+  try {
+    const res = await api.sync();
+    if (res.status === "full_sync_required") {
+      showToast(
+        "Full sync required — open the Anki desktop app to resolve it. DopaMine won't auto-overwrite your collection.",
+        "warning",
+      );
+      renderSyncLoggedIn(body, res.required || "full_sync_required");
+      return;
+    }
+    const msg =
+      res.status === "no_changes"
+        ? "Already up to date — no changes to sync."
+        : res.server_message
+          ? `Sync complete — ${res.server_message}.`
+          : "Sync complete.";
+    showToast(msg, "success");
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "SYNC_UNSUPPORTED") {
+      renderSyncUnsupported(body);
+      return;
+    }
+    if (err instanceof ApiError && err.code === "SYNC_NOT_LOGGED_IN") {
+      syncEndpoint = null;
+      showToast("Session expired — please log in again.", "error");
+      renderSyncLogin(body);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    showToast(`Sync failed: ${msg}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original ?? "Sync now";
+  }
+}
+
 // ---- Service worker (offline app shell) ----------------------------------
 
 function registerSw(): void {
@@ -405,7 +660,10 @@ async function importDeck(
 
 let toastTimer = 0;
 
-function showToast(message: string, kind: "success" | "error" = "success"): void {
+function showToast(
+  message: string,
+  kind: "success" | "error" | "warning" = "success",
+): void {
   let toast = document.querySelector<HTMLElement>(".toast");
   if (!toast) {
     toast = document.createElement("div");

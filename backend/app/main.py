@@ -15,6 +15,7 @@ from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from anki.errors import SyncError
 
 from app.db import migrate
 from app.demo import run_seed
@@ -25,6 +26,7 @@ from app.schemas import (
     AnswerRequest,
     ConfigUpdate,
     SeedDemoRequest,
+    SyncLoginRequest,
 )
 from app.services.review import ReviewCoordinator, project_state
 from app.srs.base import CardView, DeckInfo, SrsStats
@@ -45,8 +47,9 @@ def _iso(value: datetime | None) -> Optional[str]:
 _SKIP_MEDIA_PREFIXES = ("http://", "https://", "data:", "//", "/api/media")
 
 # `src="X"` / `src='X'` on any HTML tag (img/audio/video/source). Group 1 is the
-# opening quote char, group 2 the referenced value.
-_SRC_ATTR_RE = re.compile(r"""src\s*=\s*(["'])(.*?)\1""", re.IGNORECASE)
+# opening quote char, group 2 the referenced value. The leading lookbehind means
+# we match the *src* attribute only — not `data-src`, `xlink:src`, etc.
+_SRC_ATTR_RE = re.compile(r"""(?<![\w:-])src\s*=\s*(["'])(.*?)\1""", re.IGNORECASE)
 # Anki's audio placeholder syntax: [sound:filename.mp3].
 _SOUND_RE = re.compile(r"\[sound:([^\]]+)\]")
 
@@ -59,6 +62,9 @@ def _media_url(name: str) -> str:
 def _should_rewrite(value: str) -> bool:
     v = value.strip()
     if not v:
+        return False
+    # Root-relative refs (e.g. /assets/x.png) are app-absolute, not Anki media.
+    if v.startswith("/"):
         return False
     return not v.lower().startswith(_SKIP_MEDIA_PREFIXES)
 
@@ -180,6 +186,16 @@ def create_app() -> FastAPI:
     def coordinator() -> ReviewCoordinator:
         return app.state.coordinator
 
+    def require_sync_engine():
+        eng = engine()
+        if not hasattr(eng, "sync_login"):
+            raise ApiError(
+                501,
+                "SYNC_UNSUPPORTED",
+                "Sync requires the Anki engine (set DOPAMINE_SRS_ENGINE=anki).",
+            )
+        return eng
+
     # ----- routes --------------------------------------------------------
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -272,7 +288,7 @@ def create_app() -> FastAPI:
     @app.get("/api/media/{name:path}")
     def media(name: str) -> Response:
         # Reject obvious traversal / absolute paths before hitting the engine.
-        if ".." in name or name.startswith("/"):
+        if ".." in name or name.startswith("/") or "\\" in name:
             raise ApiError(400, "INVALID_MEDIA_NAME", "Invalid media name.")
 
         eng = engine()
@@ -301,6 +317,53 @@ def create_app() -> FastAPI:
         except KeyError as exc:
             raise ApiError(422, "INVALID_CONFIG", str(exc))
         return {"config": config}
+
+    @app.post("/api/sync/login")
+    def sync_login(body: SyncLoginRequest) -> dict[str, Any]:
+        eng = require_sync_engine()
+        try:
+            with coordinator().lock:
+                auth = eng.sync_login(body.username, body.password)
+                repo().set_sync_auth(auth["hkey"], auth.get("endpoint", ""))
+        except SyncError as exc:
+            raise ApiError(401, "SYNC_AUTH_FAILED", str(exc)) from exc
+        return {"ok": True, "endpoint": auth.get("endpoint", "")}
+
+    @app.post("/api/sync")
+    def sync_collection() -> dict[str, Any]:
+        eng = require_sync_engine()
+        auth = repo().get_sync_auth()
+        if auth is None:
+            raise ApiError(401, "SYNC_NOT_LOGGED_IN", "Log in to AnkiWeb first.")
+        try:
+            with coordinator().lock:
+                result = eng.sync(auth["hkey"], auth["endpoint"])
+                new_endpoint = result.get("endpoint")
+                if new_endpoint and new_endpoint != auth["endpoint"]:
+                    repo().set_sync_auth(auth["hkey"], new_endpoint)
+        except SyncError as exc:
+            raise ApiError(502, "SYNC_FAILED", str(exc)) from exc
+        return result
+
+    @app.get("/api/sync/status")
+    def sync_status() -> dict[str, Any]:
+        eng = require_sync_engine()
+        auth = repo().get_sync_auth()
+        if auth is None:
+            return {"logged_in": False}
+        result: dict[str, Any] = {"logged_in": True}
+        try:
+            with coordinator().lock:
+                result.update(eng.sync_status(auth["hkey"], auth["endpoint"]))
+        except SyncError as exc:
+            raise ApiError(502, "SYNC_FAILED", str(exc)) from exc
+        return result
+
+    @app.post("/api/sync/logout")
+    def sync_logout() -> dict[str, bool]:
+        require_sync_engine()
+        repo().clear_sync_auth()
+        return {"ok": True}
 
     return app
 

@@ -40,6 +40,7 @@ from anki.consts import (
 )
 from anki.errors import NotFoundError
 from anki.scheduler_pb2 import CardAnswer
+from anki.sync_pb2 import SyncAuth, SyncCollectionResponse, SyncStatusResponse
 
 from .base import AnswerResult, CardView, DeckInfo, ImportSummary, Rating, SrsStats
 
@@ -80,6 +81,53 @@ class AnkiLibEngine:
     def close(self) -> None:
         """Close the underlying collection (releases the SQLite file lock)."""
         self.col.close()
+
+    # ------------------------------------------------------------------ #
+    # AnkiWeb sync capability
+    # ------------------------------------------------------------------ #
+    def sync_login(self, username: str, password: str) -> dict[str, str]:
+        """Exchange AnkiWeb credentials for a reusable sync session token."""
+        auth = self.col.sync_login(username, password, None)
+        return {"hkey": auth.hkey, "endpoint": auth.endpoint or ""}
+
+    @staticmethod
+    def _sync_auth(hkey: str, endpoint: str) -> SyncAuth:
+        return SyncAuth(hkey=hkey, endpoint=endpoint or None)
+
+    def sync(self, hkey: str, endpoint: str) -> dict[str, str]:
+        """Run a safe incremental collection sync and start media sync."""
+        auth = self._sync_auth(hkey, endpoint)
+        out = self.col.sync_collection(auth, sync_media=True)
+        required = SyncCollectionResponse.ChangesRequired.Name(out.required)
+
+        if required == "NO_CHANGES":
+            status = "no_changes"
+        elif required in {"FULL_SYNC", "FULL_DOWNLOAD", "FULL_UPLOAD"}:
+            status = "full_sync_required"
+        else:
+            status = "ok"
+
+        # Media failures must not turn a successful collection sync into a
+        # failure. Anki performs this in the background.
+        try:
+            self.col.sync_media(auth)
+        except Exception:
+            pass
+
+        result = {
+            "status": status,
+            "required": required,
+            "server_message": out.server_message,
+            "media": "started",
+        }
+        if out.new_endpoint:
+            result["endpoint"] = out.new_endpoint
+        return result
+
+    def sync_status(self, hkey: str, endpoint: str) -> dict[str, str]:
+        auth = self._sync_auth(hkey, endpoint)
+        out = self.col.sync_status(auth)
+        return {"required": SyncStatusResponse.Required.Name(out.required)}
 
     def __enter__(self) -> "AnkiLibEngine":
         return self
