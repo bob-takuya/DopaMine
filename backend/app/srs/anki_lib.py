@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
+import anki.import_export_pb2 as import_export_pb2
 from anki.collection import Collection
 from anki.consts import (
     QUEUE_TYPE_DAY_LEARN_RELEARN,
@@ -39,7 +40,7 @@ from anki.consts import (
 from anki.errors import NotFoundError
 from anki.scheduler_pb2 import CardAnswer
 
-from .base import AnswerResult, CardView, DeckInfo, Rating, SrsStats
+from .base import AnswerResult, CardView, DeckInfo, ImportSummary, Rating, SrsStats
 
 _SECS_PER_DAY = 86_400
 
@@ -266,6 +267,72 @@ class AnkiLibEngine:
         deck_id = self.col.decks.id(deck)  # creates the deck if missing
         self.col.add_note(note, deck_id=deck_id)
         return [str(cid) for cid in note.card_ids()]
+
+    # ------------------------------------------------------------------ #
+    # ApkgImporter capability
+    # ------------------------------------------------------------------ #
+    def import_apkg(
+        self, apkg_path: str, into_deck: str | None = None
+    ) -> ImportSummary:
+        """Import a ``.apkg``/``.colpkg`` package via Anki's own importer.
+
+        Delegates to ``col.import_anki_package`` so notes, cards, note types and
+        their *original* deck names are recreated exactly as the package author
+        intended. The scheduling history in the package is deliberately dropped
+        (``with_scheduling=False``): imported cards enter as fresh *new* cards so
+        they surface in the DopaMine feed immediately.
+
+        ``into_deck`` is a hint only for this engine — the package carries its own
+        deck hierarchy which Anki always preserves, so it is ignored here. (The
+        fallback ``FsrsSqliteEngine`` honours it because it has no deck data to
+        preserve.)
+
+        Counts are derived from the returned ``ImportResponse`` log and from a
+        before/after diff of ``find_cards`` (the log reports notes, not cards).
+        """
+        path = Path(apkg_path).expanduser()
+
+        # Snapshot existing cards so we can attribute exactly which cards (and
+        # thus which decks) the import produced.
+        before_cards = set(self.col.find_cards(""))
+
+        Update = import_export_pb2.ImportAnkiPackageUpdateCondition
+        options = import_export_pb2.ImportAnkiPackageOptions(
+            merge_notetypes=False,
+            with_scheduling=False,
+            with_deck_configs=False,
+            update_notes=Update.IMPORT_ANKI_PACKAGE_UPDATE_CONDITION_ALWAYS,
+            update_notetypes=Update.IMPORT_ANKI_PACKAGE_UPDATE_CONDITION_ALWAYS,
+        )
+        request = import_export_pb2.ImportAnkiPackageRequest(
+            package_path=str(path),
+            options=options,
+        )
+        response = self.col.import_anki_package(request)
+        log = response.log
+
+        # Cards the import added, and the decks they landed in.
+        after_cards = set(self.col.find_cards(""))
+        new_card_ids = after_cards - before_cards
+        cards_imported = len(new_card_ids)
+
+        deck_names: set[str] = set()
+        for cid in new_card_ids:
+            card = self.col.get_card(cid)
+            deck_names.add(self.col.decks.name(card.did))
+
+        # Notes added/updated by the import. ``log.new``/``log.updated`` are the
+        # authoritative per-note lists; fall back to ``found_notes`` (total notes
+        # in the package) if both are somehow empty.
+        notes_imported = len(log.new) + len(log.updated)
+        if notes_imported == 0:
+            notes_imported = int(log.found_notes)
+
+        return ImportSummary(
+            decks=tuple(sorted(deck_names)),
+            notes_imported=notes_imported,
+            cards_imported=cards_imported,
+        )
 
     def deck_list(self) -> Sequence[DeckInfo]:
         # deck_due_tree carries the limit-respected new/learn/review counts

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import tempfile
+import zipfile
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +17,7 @@ from uuid import uuid4
 
 from fsrs import Card, Rating as FsrsRating, Scheduler
 
-from .base import AnswerResult, CardView, DeckInfo, Rating, SrsStats
+from .base import AnswerResult, CardView, DeckInfo, ImportSummary, Rating, SrsStats
 
 
 _SCHEMA = """
@@ -196,6 +198,92 @@ class FsrsSqliteEngine:
                 (card_id, note_id, deck, json.dumps(card.to_dict()), _iso(now)),
             )
         return [card_id]
+
+    def import_apkg(self, apkg_path: str, into_deck: str | None = None) -> ImportSummary:
+        """Import Basic notes from a plain-SQLite Anki package."""
+
+        try:
+            with zipfile.ZipFile(apkg_path) as package:
+                members = set(package.namelist())
+                collection_name = next(
+                    (name for name in ("collection.anki21", "collection.anki2") if name in members),
+                    None,
+                )
+                if collection_name is None:
+                    if "collection.anki21b" in members:
+                        raise ValueError(
+                            "zstd-compressed collection.anki21b is not supported by the fallback "
+                            "engine; re-export as a legacy .apkg"
+                        )
+                    raise ValueError("Anki package contains no supported collection database")
+                collection_bytes = package.read(collection_name)
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise ValueError(f"invalid Anki package: {exc}") from exc
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="dopamine-apkg-") as temp_dir:
+                collection_path = Path(temp_dir) / collection_name
+                collection_path.write_bytes(collection_bytes)
+                uri = f"{collection_path.as_uri()}?mode=ro"
+                try:
+                    with sqlite3.connect(uri, uri=True) as source:
+                        source.row_factory = sqlite3.Row
+                        deck_names = self._apkg_deck_names(source)
+                        rows = source.execute(
+                            """
+                            SELECT n.id, n.flds, n.tags, c.did
+                            FROM notes AS n
+                            LEFT JOIN cards AS c ON c.id = (
+                                SELECT MIN(c2.id) FROM cards AS c2 WHERE c2.nid = n.id
+                            )
+                            ORDER BY n.id
+                            """
+                        ).fetchall()
+                except sqlite3.Error as exc:
+                    raise ValueError(f"invalid Anki collection database: {exc}") from exc
+        finally:
+            collection_bytes = b""
+
+        imported_decks: set[str] = set()
+        notes_imported = 0
+        cards_imported = 0
+        for row in rows:
+            fields = str(row["flds"]).split("\x1f")
+            front = fields[0] if fields else ""
+            back = fields[1] if len(fields) > 1 else ""
+            original_deck = deck_names.get(str(row["did"])) if row["did"] is not None else None
+            deck_name = into_deck or original_deck or "Imported"
+            card_ids = self.add_note(
+                deck_name,
+                {"Front": front, "Back": back},
+                tags=str(row["tags"] or "").split(),
+            )
+            imported_decks.add(deck_name)
+            notes_imported += 1
+            cards_imported += len(card_ids)
+
+        return ImportSummary(tuple(sorted(imported_decks)), notes_imported, cards_imported)
+
+    @staticmethod
+    def _apkg_deck_names(connection: sqlite3.Connection) -> dict[str, str]:
+        has_decks_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'decks'"
+        ).fetchone()
+        if has_decks_table:
+            return {
+                str(row["id"]): str(row["name"])
+                for row in connection.execute("SELECT id, name FROM decks")
+            }
+
+        row = connection.execute("SELECT decks FROM col LIMIT 1").fetchone()
+        if row is None:
+            return {}
+        decks = json.loads(row["decks"] or "{}")
+        return {
+            str(deck_id): str(deck["name"])
+            for deck_id, deck in decks.items()
+            if isinstance(deck, dict) and "name" in deck
+        }
 
     def deck_list(self) -> Sequence[DeckInfo]:
         now = _iso(_utc_now())

@@ -40,6 +40,25 @@ class SrsStats:
     retention: float | None
 
 
+@dataclass(frozen=True)
+class ImportSummary:
+    decks: tuple[str, ...]
+    notes_imported: int
+    cards_imported: int
+
+
+class ApkgImporter(Protocol):
+    """Optional capability: import a `.apkg`/`.colpkg` Anki package.
+
+    Both concrete engines implement this. The import endpoint requires it; the
+    base `AnkiEngine` does not, so a minimal engine need not support import.
+    ``into_deck`` overrides the destination deck name when the package's own
+    deck names cannot be preserved (fallback engine); ``None`` keeps origins.
+    """
+
+    def import_apkg(self, apkg_path: str, into_deck: str | None = None) -> ImportSummary: ...
+
+
 class AnkiEngine(Protocol):
     def next_card(self, deck: str | None = None) -> CardView | None: ...
     def answer_card(self, card_id: str, rating: Rating) -> AnswerResult: ...

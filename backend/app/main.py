@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -24,6 +25,9 @@ from app.schemas import (
 )
 from app.services.review import ReviewCoordinator, project_state
 from app.srs.base import CardView, DeckInfo, SrsStats
+
+
+_MAX_IMPORT_BYTES = 25 * 1024 * 1024  # 25 MB cap for uploaded packages
 
 
 def _iso(value: datetime | None) -> Optional[str]:
@@ -153,6 +157,55 @@ def create_app() -> FastAPI:
     def seed_demo(body: SeedDemoRequest) -> dict[str, Any]:
         with coordinator().lock:
             return run_seed(engine(), repo(), deck=body.deck, replace=body.replace)
+
+    @app.post("/api/import")
+    async def import_apkg(file: UploadFile = File(...)) -> dict[str, Any]:
+        filename = file.filename or ""
+        lowered = filename.lower()
+        if not (lowered.endswith(".apkg") or lowered.endswith(".colpkg")):
+            raise ApiError(
+                415,
+                "UNSUPPORTED_MEDIA",
+                "Only .apkg/.colpkg Anki packages are supported.",
+            )
+
+        eng = engine()
+        if not hasattr(eng, "import_apkg"):
+            raise ApiError(
+                501,
+                "IMPORT_UNSUPPORTED",
+                "The active SRS engine does not support package import.",
+            )
+
+        # Stream to a temp file while enforcing the 25 MB cap.
+        data = await file.read()
+        if len(data) > _MAX_IMPORT_BYTES:
+            raise ApiError(
+                413,
+                "PAYLOAD_TOO_LARGE",
+                f"Package exceeds the {_MAX_IMPORT_BYTES // (1024 * 1024)} MB limit.",
+            )
+
+        suffix = ".colpkg" if lowered.endswith(".colpkg") else ".apkg"
+        fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="dopamine-import-")
+        try:
+            with os.fdopen(fd, "wb") as tmp:
+                tmp.write(data)
+            with coordinator().lock:
+                summary = eng.import_apkg(tmp_path)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+        return {
+            "imported": {
+                "decks": list(summary.decks),
+                "notes": summary.notes_imported,
+                "cards": summary.cards_imported,
+            }
+        }
 
     @app.put("/api/config")
     def put_config(body: ConfigUpdate) -> dict[str, Any]:
