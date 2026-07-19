@@ -177,20 +177,25 @@ def create_app() -> FastAPI:
                 "The active SRS engine does not support package import.",
             )
 
-        # Stream to a temp file while enforcing the 25 MB cap.
-        data = await file.read()
-        if len(data) > _MAX_IMPORT_BYTES:
-            raise ApiError(
-                413,
-                "PAYLOAD_TOO_LARGE",
-                f"Package exceeds the {_MAX_IMPORT_BYTES // (1024 * 1024)} MB limit.",
-            )
-
         suffix = ".colpkg" if lowered.endswith(".colpkg") else ".apkg"
         fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="dopamine-import-")
         try:
+            # Stream to the temp file in fixed-size chunks, enforcing the cap as
+            # we go so an oversized upload is never fully buffered in memory.
+            total = 0
             with os.fdopen(fd, "wb") as tmp:
-                tmp.write(data)
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > _MAX_IMPORT_BYTES:
+                        raise ApiError(
+                            413,
+                            "PAYLOAD_TOO_LARGE",
+                            f"Package exceeds the {_MAX_IMPORT_BYTES // (1024 * 1024)} MB limit.",
+                        )
+                    tmp.write(chunk)
             with coordinator().lock:
                 summary = eng.import_apkg(tmp_path)
         finally:

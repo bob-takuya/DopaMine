@@ -317,16 +317,19 @@ class AnkiLibEngine:
         cards_imported = len(new_card_ids)
 
         deck_names: set[str] = set()
+        note_ids: set[int] = set()
         for cid in new_card_ids:
             card = self.col.get_card(cid)
             deck_names.add(self.col.decks.name(card.did))
+            note_ids.add(card.nid)
 
         # Notes added/updated by the import. ``log.new``/``log.updated`` are the
-        # authoritative per-note lists; fall back to ``found_notes`` (total notes
-        # in the package) if both are somehow empty.
+        # authoritative per-note lists; fall back to the distinct notes among the
+        # newly-added cards (``found_notes`` counts the *package* contents, which
+        # overcounts duplicate/no-op imports where nothing was actually added).
         notes_imported = len(log.new) + len(log.updated)
         if notes_imported == 0:
-            notes_imported = int(log.found_notes)
+            notes_imported = len(note_ids)
 
         return ImportSummary(
             decks=tuple(sorted(deck_names)),

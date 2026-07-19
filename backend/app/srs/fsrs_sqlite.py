@@ -266,24 +266,37 @@ class FsrsSqliteEngine:
 
     @staticmethod
     def _apkg_deck_names(connection: sqlite3.Connection) -> dict[str, str]:
+        """Map deck-id -> name, merging BOTH sources an .apkg may use.
+
+        Older schemas store decks as JSON in the ``col`` table; newer ones use a
+        real ``decks`` table. A package can carry ids in either, so we merge them
+        (the table wins on duplicate ids) instead of trusting only one — otherwise
+        ids present only in the JSON would silently fall back to "Imported".
+        """
+        names: dict[str, str] = {}
+
+        # Legacy: decks JSON in the col table.
+        try:
+            row = connection.execute("SELECT decks FROM col LIMIT 1").fetchone()
+        except sqlite3.OperationalError:
+            row = None
+        if row is not None and row["decks"]:
+            try:
+                for deck_id, deck in json.loads(row["decks"]).items():
+                    if isinstance(deck, dict) and "name" in deck:
+                        names[str(deck_id)] = str(deck["name"])
+            except (ValueError, TypeError):
+                pass
+
+        # Modern: a real decks table (overrides JSON on duplicate ids).
         has_decks_table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'decks'"
         ).fetchone()
         if has_decks_table:
-            return {
-                str(row["id"]): str(row["name"])
-                for row in connection.execute("SELECT id, name FROM decks")
-            }
+            for row in connection.execute("SELECT id, name FROM decks"):
+                names[str(row["id"])] = str(row["name"])
 
-        row = connection.execute("SELECT decks FROM col LIMIT 1").fetchone()
-        if row is None:
-            return {}
-        decks = json.loads(row["decks"] or "{}")
-        return {
-            str(deck_id): str(deck["name"])
-            for deck_id, deck in decks.items()
-            if isinstance(deck, dict) and "name" in deck
-        }
+        return names
 
     def deck_list(self) -> Sequence[DeckInfo]:
         now = _iso(_utc_now())
