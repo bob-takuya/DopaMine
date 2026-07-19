@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+temp/
+tmp/
+node_modules/
+*.anki2
+*.anki2-*
+collection.media/
+.DS_Store
+backend/data/*.db
+orchestration/*_out.txt
+orchestration/*_log.txt

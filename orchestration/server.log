@@ -1,0 +1,37 @@
+INFO:     Started server process [40726]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:57896 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57897 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57898 - "POST /api/seed-demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57963 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57964 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57965 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57966 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57967 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57968 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57969 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57970 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57971 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57972 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57973 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57974 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57975 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57976 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57977 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57978 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57979 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57980 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57981 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57982 - "POST /api/answer HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57983 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57984 - "POST /api/answer HTTP/1.1" 422 Unprocessable Content
+INFO:     127.0.0.1:58042 - "PUT /api/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58043 - "GET /api/state HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58060 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58063 - "GET /api/next-card?deck=DopaMine%20Demo HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [40726]
