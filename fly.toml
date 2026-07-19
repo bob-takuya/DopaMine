@@ -1,0 +1,32 @@
+# Fly.io config for DopaMine. Deploy:
+#   fly launch --no-deploy --copy-config --name <your-app>   # or edit `app` below
+#   fly volumes create dopamine_data --region nrt --size 1
+#   fly secrets set DOPAMINE_SERVER_SECRET=$(openssl rand -hex 32)
+#   fly deploy
+# Fly terminates TLS, so you get https://<your-app>.fly.dev — open it on your phone.
+
+app = "dopamine"            # <-- change to a unique name
+primary_region = "nrt"       # Tokyo
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DOPAMINE_SRS_ENGINE = "fsrs"
+  DOPAMINE_DATA_DIR = "/data"
+
+# Persist progress (sqlite + media) across deploys/restarts.
+[[mounts]]
+  source = "dopamine_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0   # scale to zero when idle (personal use)
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"           # headroom for the anki backend

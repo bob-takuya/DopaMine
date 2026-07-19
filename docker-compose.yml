@@ -1,0 +1,17 @@
+# Local container run:  docker compose up --build   ->  http://localhost:8000
+# (also reachable from your phone at http://<this-computer-ip>:8000 on the LAN)
+services:
+  dopamine:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Change this to any random string in real use (HMAC seed for rewards).
+      DOPAMINE_SERVER_SECRET: "change-me-please"
+      DOPAMINE_SRS_ENGINE: "fsrs"        # or "anki" (see docs/DEPLOY.md)
+      DOPAMINE_DATA_DIR: "/data"
+    volumes:
+      - dopamine_data:/data              # persists progress across restarts
+
+volumes:
+  dopamine_data:
