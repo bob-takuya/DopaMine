@@ -345,6 +345,31 @@ select:focus-visible {
   scroll-snap-type: y mandatory;
 }
 
+/* Per-card thinking-time — subtle, low-emphasis, top-right near the deck chip.
+   A plain text update (tabular-nums); never competes with the card. */
+.feed__timer {
+  position: absolute;
+  top: calc(var(--hud-h) + 22px);
+  right: 26px;
+  z-index: 12;
+  pointer-events: none;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+  opacity: 0.8;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+.feed__timer[hidden] {
+  display: none;
+}
+/* On grade the value settles — a touch more presence, still quiet. */
+.feed__timer--final {
+  color: var(--fg-2);
+  opacity: 1;
+}
+
 /* ---- Card ---- */
 .card {
   position: absolute;
@@ -915,6 +940,50 @@ select:focus-visible {
   padding: 8px 10px;
   font-size: 14px;
   font-weight: 600;
+}
+
+/* ---- 表示 (Display) — client-side prefs (文字サイズ / タイマー) ---- */
+.sheet__section-title {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+/* Segmented control: glass track, hairline, active = aqua. */
+.seg {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+.seg__btn {
+  border: none;
+  background: transparent;
+  color: var(--fg-2);
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 42px;
+  padding: 7px 12px;
+  border-radius: var(--r-pill);
+  transition: color 0.14s ease, background 0.14s ease;
+}
+.seg__btn--active {
+  color: var(--bg);
+  background: var(--accent);
+}
+
+/* Finish screen: average per-card time line. */
+.finish-timing {
+  margin: -6px 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
 }
 .sheet__transparency {
   font-size: 12px;

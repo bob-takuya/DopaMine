@@ -5,6 +5,7 @@
 // and never talks to the API or mutates game state itself.
 
 import { animate, bloom, enter, press, reduceMotion, SPRING } from "../motion.ts";
+import { FONT_SCALE_MULTIPLIER, prefs } from "../prefs.ts";
 import { RATING_LABEL, type CardView, type Rating } from "../types.ts";
 
 type Phase = "question" | "answer";
@@ -33,9 +34,11 @@ const SHADOW_BASE_CSS = `
     text-align: center;
     color: inherit;
   }
-  .card__front { font-size: clamp(40px, 14vw, 88px); font-weight: 900; line-height: 1.05; }
+  /* --card-scale (from the user's 文字サイズ pref) scales BOTH faces together.
+     It inherits across the shadow boundary from the light-DOM .card article. */
+  .card__front { font-size: calc(clamp(40px, 14vw, 88px) * var(--card-scale, 1)); font-weight: 900; line-height: 1.05; }
   .card__divider { width: 44%; border: none; border-top: 2px dashed #3a3a5c; margin: 6px 0; }
-  .card__back { font-size: clamp(24px, 7vw, 40px); font-weight: 700; color: var(--neon-lime, #c6ff4a); }
+  .card__back { font-size: calc(clamp(24px, 7vw, 40px) * var(--card-scale, 1)); font-weight: 700; color: var(--neon-lime, #c6ff4a); }
   img { max-width: 100%; height: auto; }
   @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 `;
@@ -68,11 +71,24 @@ export class CardComponent {
     this.el.setAttribute("aria-label", `Card in ${card.deck}`);
     this.render();
     this.wireGestures();
+    this.refreshFontScale();
   }
 
   /** Play the quiet-luxury card-enter (translateY 12→0, scale .985→1, fade, SPRING). */
   playEnter(): void {
     enter(this.el);
+  }
+
+  /**
+   * Apply the saved 文字サイズ (card font-scale) preference by setting the
+   * `--card-scale` custom property on the light-DOM card element. Because custom
+   * properties inherit through the shadow boundary, the shadow `.card__front` /
+   * `.card__back` pick it up and scale together. Safe to call any time (mount or
+   * a live settings change on the currently-mounted card).
+   */
+  refreshFontScale(): void {
+    const scale = FONT_SCALE_MULTIPLIER[prefs.get("cardFontScale")];
+    this.el.style.setProperty("--card-scale", String(scale));
   }
 
   getCard(): CardView {

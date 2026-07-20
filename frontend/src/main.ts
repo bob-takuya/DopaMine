@@ -11,6 +11,7 @@ import { Hud } from "./components/hud.ts";
 import { effects } from "./effects.ts";
 import { Feed } from "./feed.ts";
 import { viewTransition } from "./motion.ts";
+import { type FontScale, prefs } from "./prefs.ts";
 import { store } from "./store.ts";
 import type { DeckInfo, GuardrailPatch, SyncDirection } from "./types.ts";
 
@@ -93,6 +94,8 @@ function clearRoot(): void {
 function renderDeckPicker(): void {
   viewTransition(() => {
   clearRoot();
+  feed?.dispose(); // release the previous feed's listeners/timer before leaving
+  feed = null;
   syncFinishBtn = null; // the study-view sync button is gone once we leave the feed
   const snap = store.get();
   const wrap = document.createElement("div");
@@ -230,6 +233,7 @@ function startFeed(deck: string | null): void {
   syncFinish.addEventListener("click", () => void doSyncFinish(syncFinish));
   syncFinishBtn = syncFinish;
 
+  feed?.dispose(); // dispose any prior feed before replacing it
   feed = new Feed(api, store, { onReview: () => onSessionReview() });
   shell.append(hud.el, feed.el, back, syncFinish);
   appRoot!.appendChild(shell);
@@ -341,6 +345,80 @@ function openSettings(): void {
   });
   capRow.append(capInfo, capSel);
   sheet.appendChild(capRow);
+
+  // ---- 表示 (Display) — CLIENT-SIDE prefs (localStorage), not server guardrails.
+  const dispTitle = document.createElement("h3");
+  dispTitle.className = "sheet__section-title";
+  dispTitle.textContent = "表示 (Display)";
+  sheet.appendChild(dispTitle);
+
+  // 文字サイズ: 小 / 中 / 大 — a quiet-luxury segmented control.
+  const fontRow = document.createElement("div");
+  fontRow.className = "toggle-row";
+  const fontInfo = document.createElement("div");
+  fontInfo.className = "toggle-row__info";
+  const fontLab = document.createElement("span");
+  fontLab.className = "toggle-row__label";
+  fontLab.textContent = "文字サイズ";
+  const fontDesc = document.createElement("span");
+  fontDesc.className = "toggle-row__desc";
+  fontDesc.textContent = "カードの問題・答えの文字サイズ。";
+  fontInfo.append(fontLab, fontDesc);
+
+  const seg = document.createElement("div");
+  seg.className = "seg";
+  seg.setAttribute("role", "group");
+  seg.setAttribute("aria-label", "文字サイズ");
+  const sizeOptions: Array<[FontScale, string]> = [
+    ["s", "小"],
+    ["m", "中"],
+    ["l", "大"],
+  ];
+  const segBtns = new Map<FontScale, HTMLButtonElement>();
+  const syncSeg = (): void => {
+    const cur = prefs.get("cardFontScale");
+    for (const [val, btn] of segBtns) {
+      const on = val === cur;
+      btn.classList.toggle("seg__btn--active", on);
+      btn.setAttribute("aria-pressed", String(on));
+    }
+  };
+  for (const [val, label] of sizeOptions) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "seg__btn";
+    b.textContent = label;
+    b.setAttribute("aria-label", `文字サイズ ${label}`);
+    b.addEventListener("click", () => {
+      prefs.set("cardFontScale", val); // Feed's prefs subscription re-scales the live card
+      syncSeg();
+    });
+    segBtns.set(val, b);
+    seg.appendChild(b);
+  }
+  syncSeg();
+  fontRow.append(fontInfo, seg);
+  sheet.appendChild(fontRow);
+
+  // タイマー表示: オン / オフ
+  const timerRow = document.createElement("label");
+  timerRow.className = "toggle-row";
+  const timerInfo = document.createElement("div");
+  timerInfo.className = "toggle-row__info";
+  const timerLab = document.createElement("span");
+  timerLab.className = "toggle-row__label";
+  timerLab.textContent = "タイマー表示";
+  const timerDesc = document.createElement("span");
+  timerDesc.className = "toggle-row__desc";
+  timerDesc.textContent = "カードごとの経過時間をそっと表示します。";
+  timerInfo.append(timerLab, timerDesc);
+  const timerInput = document.createElement("input");
+  timerInput.type = "checkbox";
+  timerInput.className = "toggle-row__input";
+  timerInput.checked = prefs.get("showTimer");
+  timerInput.addEventListener("change", () => prefs.set("showTimer", timerInput.checked));
+  timerRow.append(timerInfo, timerInput);
+  sheet.appendChild(timerRow);
 
   // Transparency: pity counters + disclosed odds
   const st = store.state;
@@ -828,6 +906,15 @@ function showFinishScreen(): void {
   summary.className = "finish-summary";
   summary.textContent = `デッキ: ${deck ? deck : "すべての期限カード"} ・ このセッションの学習: ${sessionReviews}枚`;
   sheet.appendChild(summary);
+
+  // Optional: average per-card thinking-time (reuses the feed's captured timings).
+  const timing = feed?.sessionTiming();
+  if (timing && timing.count > 0) {
+    const t = document.createElement("p");
+    t.className = "finish-timing";
+    t.textContent = `平均 ${timing.avgSec.toFixed(1)}秒 / ${timing.count}問`;
+    sheet.appendChild(t);
+  }
 
   const cont = document.createElement("button");
   cont.className = "primary-btn";

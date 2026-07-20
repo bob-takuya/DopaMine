@@ -19,10 +19,20 @@ import { CardComponent } from "./components/card-view.ts";
 import { RewardOverlay } from "./components/reward-overlay.ts";
 import { effects } from "./effects.ts";
 import { exit } from "./motion.ts";
+import { prefs } from "./prefs.ts";
 import type { Store } from "./store.ts";
 import type { CardView, Rating } from "./types.ts";
 
 const NO_DARK_BATCH = 10; // deliberate Continue gate every N reviews
+
+/** Format elapsed thinking-time: "12.3s" under a minute, "1:05" beyond. */
+function formatElapsed(ms: number): string {
+  const totalSec = ms / 1000;
+  if (totalSec < 60) return `${totalSec.toFixed(1)}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = Math.floor(totalSec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 export class Feed {
   readonly el: HTMLElement;
@@ -40,6 +50,19 @@ export class Feed {
   private pendingRating: Rating | null = null;
   private reviewsSinceContinue = 0;
 
+  // ---- Per-card timer -------------------------------------------------------
+  // Measures "thinking time": from when a card enters the question phase (mount)
+  // until the grade action commits. It stops at the grade action (not when the
+  // server responds), so it never keeps ticking through the locked/pending state
+  // or on the finished card.
+  private timerEl: HTMLElement;
+  private timerStart = 0;
+  private timerInterval = 0;
+  private timerRunning = false; // actively ticking toward a grade
+  private timerActive = false; // a card timing cycle is on screen (running or settled)
+  private sessionTimes: number[] = []; // captured per-card times (ms) this session
+  private prefsUnsub: () => void;
+
   constructor(
     private api: ApiClient,
     private store: Store,
@@ -50,8 +73,24 @@ export class Feed {
     this.slots = document.createElement("div");
     this.slots.className = "feed__slots";
     this.overlayHost = this.overlay.el;
-    this.el.append(this.slots, this.overlayHost);
+    this.timerEl = document.createElement("div");
+    this.timerEl.className = "feed__timer";
+    this.timerEl.setAttribute("aria-hidden", "true");
+    this.timerEl.hidden = true;
+    this.el.append(this.slots, this.overlayHost, this.timerEl);
+    // React to live display-pref changes: re-scale the mounted card's text and
+    // show/hide the timer without waiting for the next card.
+    this.prefsUnsub = prefs.subscribe(() => {
+      this.active?.refreshFontScale();
+      this.applyTimerVisibility();
+    });
     this.wireKeyboard();
+  }
+
+  /** Tear down long-lived listeners/intervals when the feed is discarded. */
+  dispose(): void {
+    this.stopTicking();
+    this.prefsUnsub();
   }
 
   async start(deck: string | null): Promise<void> {
@@ -59,6 +98,74 @@ export class Feed {
     this.store.setActiveDeck(deck);
     this.reviewsSinceContinue = 0;
     await this.loadFirstCard();
+  }
+
+  // ---- Per-card timer ------------------------------------------------------
+
+  /** Begin timing a freshly mounted card (question phase enters). */
+  private startTimer(): void {
+    this.stopTicking();
+    this.timerStart = performance.now();
+    this.timerRunning = true;
+    this.timerActive = true;
+    this.timerEl.classList.remove("feed__timer--final");
+    this.renderTimer(0);
+    this.applyTimerVisibility();
+  }
+
+  /** Capture thinking-time at the grade action; stop ticking, settle the final. */
+  private captureTimer(): number {
+    const elapsed = this.timerRunning ? performance.now() - this.timerStart : 0;
+    this.timerRunning = false;
+    this.stopTicking();
+    this.renderTimer(elapsed);
+    this.timerEl.classList.add("feed__timer--final");
+    return elapsed;
+  }
+
+  /** No card timing on screen (terminal/gate/reload) — hide + reset. */
+  private clearTimer(): void {
+    this.timerRunning = false;
+    this.timerActive = false;
+    this.stopTicking();
+    this.applyTimerVisibility();
+  }
+
+  private stopTicking(): void {
+    if (this.timerInterval) {
+      window.clearInterval(this.timerInterval);
+      this.timerInterval = 0;
+    }
+  }
+
+  /** Reflect the showTimer pref + current phase onto the timer element. */
+  private applyTimerVisibility(): void {
+    const show = prefs.get("showTimer") && this.timerActive;
+    this.timerEl.hidden = !show;
+    if (show && this.timerRunning) {
+      // Text update (not an animation) — fine under reduced motion.
+      this.stopTicking();
+      this.timerInterval = window.setInterval(() => {
+        if (!this.timerRunning) {
+          this.stopTicking();
+          return;
+        }
+        this.renderTimer(performance.now() - this.timerStart);
+      }, 100);
+    } else {
+      this.stopTicking();
+    }
+  }
+
+  private renderTimer(ms: number): void {
+    this.timerEl.textContent = formatElapsed(ms);
+  }
+
+  /** Session summary of captured per-card times (for the 完了 screen). */
+  sessionTiming(): { count: number; avgSec: number } {
+    const count = this.sessionTimes.length;
+    const total = this.sessionTimes.reduce((a, b) => a + b, 0);
+    return { count, avgSec: count ? total / count / 1000 : 0 };
   }
 
   private wireKeyboard(): void {
@@ -98,6 +205,8 @@ export class Feed {
     comp.el.classList.add("card--active");
     this.slots.appendChild(comp.el);
     comp.playEnter();
+    // The card has entered the question phase — start (reset) its timer.
+    this.startTimer();
     requestAnimationFrame(() => comp.focus());
   }
 
@@ -145,6 +254,14 @@ export class Feed {
     if (this.capReached()) {
       this.showCapStop();
       return;
+    }
+
+    // The grade action has committed — capture thinking-time now and stop the
+    // ticker so it never runs through the locked/pending request. On a retry the
+    // timer is already stopped (timerRunning === false), so this is a no-op and
+    // the session total is not double-counted.
+    if (this.timerRunning) {
+      this.sessionTimes.push(this.captureTimer());
     }
 
     this.answering = true;
@@ -304,6 +421,8 @@ export class Feed {
     this.active = null;
     this.prefetched = null;
     this.prefetchedEl = null;
+    // No card is timing on a terminal/gate/reload screen.
+    this.clearTimer();
     // Reaching a terminal/reload screen abandons any in-flight review_id so a
     // later grade on a different card never reuses a stale idempotency key.
     this.pendingReviewId = null;
