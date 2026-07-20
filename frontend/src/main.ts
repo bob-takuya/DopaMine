@@ -10,6 +10,7 @@ import { cache } from "./cache.ts";
 import { Hud } from "./components/hud.ts";
 import { effects } from "./effects.ts";
 import { Feed } from "./feed.ts";
+import { viewTransition } from "./motion.ts";
 import { store } from "./store.ts";
 import type { DeckInfo, GuardrailPatch, SyncDirection } from "./types.ts";
 
@@ -90,6 +91,7 @@ function clearRoot(): void {
 }
 
 function renderDeckPicker(): void {
+  viewTransition(() => {
   clearRoot();
   syncFinishBtn = null; // the study-view sync button is gone once we leave the feed
   const snap = store.get();
@@ -184,6 +186,7 @@ function renderDeckPicker(): void {
   }
 
   appRoot!.appendChild(wrap);
+  });
 }
 
 function deckCard(d: DeckInfo): HTMLElement {
@@ -198,6 +201,7 @@ function deckCard(d: DeckInfo): HTMLElement {
 }
 
 function startFeed(deck: string | null): void {
+  viewTransition(() => {
   clearRoot();
   const shell = document.createElement("div");
   shell.className = "app-shell";
@@ -230,6 +234,7 @@ function startFeed(deck: string | null): void {
   shell.append(hud.el, feed.el, back, syncFinish);
   appRoot!.appendChild(shell);
   void feed.start(deck);
+  });
 }
 
 /** One review committed in the feed — count it for the session summary + gate. */
@@ -365,7 +370,9 @@ function openSettings(): void {
   backdrop.addEventListener("click", (e) => {
     if (e.target === backdrop) backdrop.remove();
   });
-  document.body.appendChild(backdrop);
+  viewTransition(() => {
+    document.body.appendChild(backdrop);
+  });
 }
 
 // ---- AnkiWeb sync panel ---------------------------------------------------
@@ -411,7 +418,9 @@ function openSync(): void {
   backdrop.addEventListener("click", (e) => {
     if (e.target === backdrop) backdrop.remove();
   });
-  document.body.appendChild(backdrop);
+  viewTransition(() => {
+    document.body.appendChild(backdrop);
+  });
 
   void refreshSync(body);
 }
@@ -831,7 +840,9 @@ function showFinishScreen(): void {
   backdrop.addEventListener("click", (e) => {
     if (e.target === backdrop) backdrop.remove();
   });
-  document.body.appendChild(backdrop);
+  viewTransition(() => {
+    document.body.appendChild(backdrop);
+  });
 }
 
 /**

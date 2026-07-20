@@ -1,13 +1,5 @@
-// Reward overlay: consumes server reward events IN ORDER and presents them.
-//
-// Contract (ARCHITECTURE §6, §9):
-//  - Renders EXACTLY the server payload. It never rerolls or invents outcomes;
-//    a near_miss carries truth="no_drop" and MUST NOT show a real drop.
-//  - XP/combo/streak are a non-blocking ~700ms flourish.
-//  - Loot reveal is a skippable, at-most-1.5s anticipation. The suspense timing
-//    is randomized *presentation only* — the tier shown is the server's tier.
-//  - In no_dark_pattern_mode: near-miss events are already suppressed server-
-//    side; the overlay drops suspense delays and shows disclosed odds.
+// Server-authored reward choreography. Events are consumed in their emitted
+// order and their payloads are displayed verbatim; presentation never rerolls.
 
 import {
   BASE_LOOT_ODDS,
@@ -16,6 +8,17 @@ import {
   type RewardEvent,
 } from "../types.ts";
 import { effects } from "../effects.ts";
+import {
+  animate,
+  bloom,
+  countUp,
+  EASE_OUT,
+  enter,
+  exit,
+  reduceMotion,
+  SPRING,
+  SPRING_SOFT,
+} from "../motion.ts";
 
 const TIER_LABEL: Record<LootTier, string> = {
   common: "COMMON",
@@ -24,19 +27,20 @@ const TIER_LABEL: Record<LootTier, string> = {
   legendary: "LEGENDARY",
 };
 
+const TIER_COLOR: Record<LootTier, string> = {
+  common: "var(--rar-common)",
+  rare: "var(--rar-rare)",
+  epic: "var(--rar-epic)",
+  legendary: "var(--rar-legendary)",
+};
+
 const ITEM_EMOJI: Record<string, string> = {
-  spark: "✨",
-  slime: "🟢",
-  neon_cat: "🐱",
-  streak_freeze: "🧊",
-  golden_brain: "🧠",
-  glitch_aura: "🌀",
-  dopamine_crown: "👑",
+  spark: "✨", slime: "🟢", neon_cat: "🐱", streak_freeze: "🧊",
+  golden_brain: "🧠", glitch_aura: "🌀", dopamine_crown: "👑",
 };
 
 export interface OverlayContext {
   config: GuardrailConfig;
-  /** Player level before vs after, to detect a level-up moment. */
   levelBefore: number;
   levelAfter: number;
 }
@@ -44,254 +48,276 @@ export interface OverlayContext {
 export class RewardOverlay {
   readonly el: HTMLElement;
   private skipResolve: (() => void) | null = null;
+  private config: GuardrailConfig | null = null;
+  private lastCombo: number | null = null;
+  private run = 0;
 
   constructor() {
     this.el = document.createElement("div");
     this.el.className = "reward-overlay";
     this.el.setAttribute("aria-live", "polite");
-    // Tap anywhere to skip the current loot reveal.
     this.el.addEventListener("pointerdown", () => this.skip());
   }
 
   private skip(): void {
-    if (this.skipResolve) {
-      const r = this.skipResolve;
-      this.skipResolve = null;
-      r();
-    }
+    this.skipResolve?.();
+    this.skipResolve = null;
   }
 
-  /**
-   * Play a reward sequence. Resolves when the (skippable) loot reveal is done so
-   * the feed can then animate the answered card out.
-   */
   async play(events: RewardEvent[], ctx: OverlayContext): Promise<void> {
+    const run = ++this.run;
+    this.skip();
     this.config = ctx.config;
-    const reduced =
-      typeof matchMedia !== "undefined" &&
-      matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    // Consume in emitted order.
+    // Do not reorder: this loop is the server's reward timeline.
     for (const ev of events) {
+      if (run !== this.run) return;
       switch (ev.type) {
         case "xp_awarded":
-          this.flourishXp(ev.payload.amount, ev.payload.multiplier);
+          this.flourishXp(ev.payload.amount, ev.payload.multiplier, run);
           break;
         case "combo_changed":
-          if (ev.payload.combo >= 2) this.flourishCombo(ev.payload.combo);
+          this.flourishCombo(ev.payload.combo, run);
           break;
         case "streak_changed":
-          this.flourishStreak(
-            ev.payload.streak_days,
-            ev.payload.freeze_protected === true,
-          );
+          this.flourishStreak(ev.payload.streak_days, ev.payload.freeze_protected === true, run);
           break;
         case "loot_dropped":
-          await this.revealLoot(
-            ev.payload.tier,
-            ev.payload.item,
-            ev.payload.pity_forced,
-            ctx,
-            reduced,
-          );
+          await this.revealLoot(ev.payload.tier, ev.payload.item, ev.payload.pity_forced, ctx, run);
           break;
         case "near_miss":
-          // Presentation only — teases a tier but truth is no_drop.
-          await this.revealNearMiss(ev.payload.teased_tier, ctx, reduced);
+          await this.revealNearMiss(ev.payload.teased_tier, ev.payload.truth, ctx, run);
           break;
         case "no_drop":
-          this.revealNoDrop(ctx, "odds" in ev.payload ? ev.payload.odds : undefined);
+          this.revealNoDrop(ctx, "odds" in ev.payload ? ev.payload.odds : undefined, run);
           break;
       }
     }
-
-    // Level-up sting after the sequence, if the level advanced.
-    if (ctx.levelAfter > ctx.levelBefore) {
-      this.levelUp(ctx.levelAfter);
-    }
+    if (run === this.run && ctx.levelAfter > ctx.levelBefore) this.levelUp(ctx.levelAfter, run);
   }
 
-  // ---- Non-blocking flourishes (~700ms) -----------------------------------
+  private removeLater(node: HTMLElement, ms: number, run: number): void {
+    window.setTimeout(() => {
+      if (run === this.run && node.isConnected) void exit(node).then(() => node.remove());
+      else node.remove();
+    }, ms);
+  }
 
-  private floater(text: string, cls: string, life = 700): void {
+  private center(node: Element): { x: number; y: number } {
+    const r = node.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  private flourishXp(amount: number, multiplier: number, run: number): void {
     const node = document.createElement("div");
-    node.className = `reward-float ${cls}`;
-    node.textContent = text;
-    this.el.appendChild(node);
-    window.setTimeout(() => node.remove(), life + 60);
+    node.className = "reward-float reward-float--xp";
+    const number = document.createElement("span");
+    const suffix = document.createElement("span");
+    suffix.textContent = ` XP${multiplier > 1 ? ` ×${multiplier.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}` : ""}`;
+    node.append(number, suffix);
+    this.el.append(node);
+    void enter(node);
+    countUp(number, 0, amount, { duration: 480, format: (value) => `+${Math.round(value)}` });
+    requestAnimationFrame(() => {
+      if (!node.isConnected) return;
+      const p = this.center(node);
+      const magnitude = Math.max(-1, Math.min(1, (amount - 20) / 80));
+      bloom(p.x, p.y, { size: 180 * (1 + magnitude * 0.2), intensity: 0.42 });
+    });
+    this.removeLater(node, 620, run);
   }
 
-  private flourishXp(amount: number, multiplier: number): void {
-    const mult = multiplier > 1 ? ` ×${multiplier.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}` : "";
-    this.floater(`+${amount} XP${mult}`, "reward-float--xp");
+  private flourishCombo(combo: number, run: number): void {
+    const previous = this.lastCombo;
+    this.lastCombo = combo;
+    const node = document.createElement("div");
+    node.className = "reward-float reward-float--combo";
+    node.textContent = `×${combo} COMBO`;
+    node.style.padding = "7px 12px";
+    node.style.borderRadius = "var(--r-pill)";
+    node.style.background = "var(--accent-dim)";
+    node.style.border = combo >= 10
+      ? "1px solid color-mix(in srgb, var(--accent-line) 90%, var(--rar-legendary) 10%)"
+      : "1px solid var(--accent-line)";
+    this.el.append(node);
+
+    const reset = previous !== null && combo < previous;
+    if (reduceMotion()) {
+      void enter(node);
+    } else if (reset) {
+      void animate(node, { transform: ["scale(1)", "scale(.94)", "scale(1)"], opacity: [1, .66, 1] },
+        { duration: .34, ease: EASE_OUT as never });
+    } else {
+      void animate(node,
+        { transform: ["scale(1)", "scale(1.06)", "scale(1)"], filter: ["brightness(1)", "brightness(1.16)", "brightness(1)"] },
+        { type: "spring", ...SPRING });
+      if (this.config?.sound_enabled) effects.comboRise(combo);
+    }
+    this.removeLater(node, 620, run);
   }
 
-  private flourishCombo(combo: number): void {
-    this.floater(`x${combo} COMBO`, "reward-float--combo");
+  private flourishStreak(days: number, freezeProtected: boolean, run: number): void {
+    const node = document.createElement("div");
+    node.className = "reward-float reward-float--streak";
+    node.textContent = freezeProtected ? `Streak ${days} · freeze protected` : `${days}-day streak`;
+    this.el.append(node);
+    if (reduceMotion()) void enter(node);
+    else void animate(node, { transform: ["scale(1)", "scale(1.05)", "scale(1)"], opacity: [.78, 1, 1] },
+      { type: "spring", ...SPRING });
+    requestAnimationFrame(() => {
+      const p = this.center(node);
+      bloom(p.x, p.y, { size: 130, intensity: .22 });
+    });
+    this.removeLater(node, 720, run);
   }
 
-  private flourishStreak(days: number, freezeProtected: boolean): void {
-    const label = freezeProtected
-      ? `🧊 Streak ${days} (freeze protected)`
-      : `🔥 ${days}-day streak`;
-    this.floater(label, "reward-float--streak", 900);
-  }
-
-  private levelUp(level: number): void {
+  private levelUp(level: number, run: number): void {
     if (this.el.querySelector(".levelup")) return;
     const node = document.createElement("div");
     node.className = "levelup";
-    node.innerHTML = `<span class="levelup__flash"></span><span class="levelup__text">LEVEL ${level}</span>`;
-    this.el.appendChild(node);
+    const text = document.createElement("span");
+    text.className = "levelup__text";
+    text.textContent = `LEVEL ${level}`;
+    node.append(text);
+    this.el.append(node);
+    void enter(text, { soft: true });
+    const p = this.center(text);
+    bloom(p.x, p.y, { size: 260, intensity: .4 });
     if (this.config?.sound_enabled) effects.levelUpChime();
     effects.burst({ tier: "epic" });
-    window.setTimeout(() => node.remove(), 1400);
+    this.removeLater(node, 1050, run);
   }
 
-  private config: GuardrailConfig | null = null;
-
-  // ---- Loot reveal (skippable, ≤1.5s) -------------------------------------
-
-  private async revealLoot(
-    tier: LootTier,
-    item: string,
-    pityForced: boolean,
-    ctx: OverlayContext,
-    reduced: boolean,
-  ): Promise<void> {
-    this.config = ctx.config;
-    const noDark = ctx.config.no_dark_pattern_mode;
-    // Anticipation duration: randomized presentation, capped at 1.5s. No-dark or
-    // reduced-motion collapses it to an instant reveal.
-    const suspenseMs = noDark || reduced ? 0 : 400 + Math.floor(Math.random() * 1100);
-
+  private makeLootPanel(tier: LootTier): { panel: HTMLDivElement; token: HTMLDivElement; tierEl: HTMLDivElement; itemEl: HTMLDivElement } {
     const panel = document.createElement("div");
     panel.className = `loot loot--${tier}`;
-    const chest = document.createElement("div");
-    chest.className = "loot__chest";
-    chest.textContent = "🎁";
+    panel.style.color = TIER_COLOR[tier];
+    const token = document.createElement("div");
+    token.className = "loot__chest";
+    token.textContent = "◆";
     const tierEl = document.createElement("div");
     tierEl.className = "loot__tier";
-    tierEl.textContent = suspenseMs > 0 ? "…" : TIER_LABEL[tier];
     const itemEl = document.createElement("div");
     itemEl.className = "loot__item";
-    const skipHint = document.createElement("div");
-    skipHint.className = "loot__skip";
-    skipHint.textContent = "tap to skip";
-    panel.append(chest, tierEl, itemEl, skipHint);
+    panel.append(token, tierEl, itemEl);
+    return { panel, token, tierEl, itemEl };
+  }
 
-    if (noDark) {
-      panel.appendChild(this.oddsTable());
-    }
-    this.el.appendChild(panel);
-
-    // Anticipation window (skippable).
-    if (suspenseMs > 0) {
-      panel.classList.add("loot--suspense");
-      await this.skippableDelay(suspenseMs);
-      panel.classList.remove("loot--suspense");
-    }
-
-    // Land the exact server outcome.
+  private async revealLoot(tier: LootTier, item: string, pityForced: boolean, ctx: OverlayContext, run: number): Promise<void> {
+    const { panel, token, tierEl, itemEl } = this.makeLootPanel(tier);
     tierEl.textContent = TIER_LABEL[tier];
-    itemEl.textContent = `${ITEM_EMOJI[item] ?? "🎁"} ${item}`;
+    itemEl.textContent = `${ITEM_EMOJI[item] ?? "◆"} ${item}`;
     if (pityForced) {
       const pity = document.createElement("div");
       pity.className = "loot__pity";
       pity.textContent = "pity guaranteed";
-      panel.appendChild(pity);
+      panel.append(pity);
     }
-    if (ctx.config.sound_enabled) effects.lootChime(tier);
+    if (ctx.config.no_dark_pattern_mode) panel.append(this.oddsTable());
+    this.el.append(panel);
+    void enter(panel, { soft: true });
+
+    if (tier === "legendary" && !reduceMotion()) this.spotlight(panel, true);
+    if (!reduceMotion()) {
+      void animate(token, { transform: ["translateY(8px) scale(.94)", "translateY(0) scale(1)"], opacity: [0, 1] },
+        { type: "spring", ...SPRING_SOFT });
+      if (tier !== "common") this.shimmer(panel);
+    }
+
+    const p = this.center(panel);
+    if (tier === "legendary") {
+      bloom(p.x, p.y, { color: "var(--rar-legendary)", size: 360, intensity: .3 });
+      if (ctx.config.sound_enabled) effects.legendaryChime();
+    }
     if (ctx.config.haptics_enabled) effects.lootHaptic(tier);
-    effects.burst({ tier });
+    effects.burst({ tier, x: p.x, y: p.y });
 
-    // Hold the landed reveal briefly (also skippable).
-    await this.skippableDelay(noDark || reduced ? 300 : 700);
-    panel.classList.add("loot--out");
-    window.setTimeout(() => panel.remove(), 260);
+    await this.skippableDelay(reduceMotion() ? 120 : tier === "legendary" ? 1050 : tier === "common" ? 420 : 760);
+    if (run !== this.run) return panel.remove();
+    if (tier === "legendary") this.spotlight(panel, false);
+    await exit(panel);
+    panel.remove();
   }
 
-  private async revealNearMiss(
-    teased: LootTier,
-    ctx: OverlayContext,
-    reduced: boolean,
-  ): Promise<void> {
-    // Honest: tease the tier, then reveal it did NOT drop. Never shows an item.
-    this.config = ctx.config;
-    const panel = document.createElement("div");
-    panel.className = `loot loot--near-miss loot--${teased}`;
-    const chest = document.createElement("div");
-    chest.className = "loot__chest";
-    chest.textContent = "🎁";
-    const tierEl = document.createElement("div");
-    tierEl.className = "loot__tier";
-    tierEl.textContent = `so close… ${TIER_LABEL[teased]}?`;
-    const truth = document.createElement("div");
-    truth.className = "loot__item loot__item--miss";
-    panel.append(chest, tierEl, truth);
-    this.el.appendChild(panel);
+  private shimmer(panel: HTMLElement): void {
+    const sweep = document.createElement("span");
+    sweep.setAttribute("aria-hidden", "true");
+    sweep.style.position = "absolute";
+    sweep.style.inset = "0";
+    sweep.style.borderRadius = "inherit";
+    sweep.style.background = "linear-gradient(115deg, transparent 34%, rgba(255,255,255,.16) 49%, transparent 64%)";
+    sweep.style.pointerEvents = "none";
+    panel.append(sweep);
+    const controls = animate(sweep, { transform: ["translateX(-120%)", "translateX(120%)"], opacity: [0, .65, 0] },
+      { duration: .7, times: [0, .45, 1], ease: EASE_OUT as never });
+    void controls.then(() => sweep.remove()).catch(() => sweep.remove());
+  }
 
-    const suspenseMs = reduced ? 0 : 500 + Math.floor(Math.random() * 800);
-    if (suspenseMs > 0) {
-      panel.classList.add("loot--suspense");
-      await this.skippableDelay(suspenseMs);
-      panel.classList.remove("loot--suspense");
+  private spotlight(except: HTMLElement, dim: boolean): void {
+    for (const child of Array.from(this.el.children)) {
+      if (child === except) continue;
+      void animate(child, { opacity: dim ? .6 : 1 }, { duration: .22, ease: EASE_OUT as never });
     }
-    tierEl.textContent = `${TIER_LABEL[teased]}…`;
-    truth.textContent = "no drop";
-    effects.softBlip();
-    await this.skippableDelay(reduced ? 200 : 500);
-    panel.classList.add("loot--out");
-    window.setTimeout(() => panel.remove(), 260);
+    const layer = document.getElementById("fx-layer");
+    if (layer) void animate(layer, { filter: dim ? "brightness(.6)" : "brightness(1)" }, { duration: .22, ease: EASE_OUT as never });
   }
 
-  private revealNoDrop(
-    ctx: OverlayContext,
-    odds?: Partial<Record<LootTier, number>>,
-  ): void {
-    this.config = ctx.config;
-    // No celebration for no-drop, especially in no_dark_pattern_mode.
+  private async revealNearMiss(teased: LootTier, truthValue: "no_drop", ctx: OverlayContext, run: number): Promise<void> {
+    if (ctx.config.no_dark_pattern_mode || reduceMotion()) {
+      this.revealNoDrop(ctx, undefined, run, truthValue);
+      return;
+    }
+    const { panel, token, tierEl, itemEl } = this.makeLootPanel(teased);
+    tierEl.textContent = TIER_LABEL[teased];
+    itemEl.textContent = `truth: ${truthValue}`;
+    this.el.append(panel);
+    void enter(panel, { soft: true });
+    // One restrained glimmer; no suspense copy and no fake item.
+    void animate(token, { filter: ["brightness(1)", "brightness(1.08)", "brightness(1)"], opacity: [.78, 1, .78] },
+      { duration: .42, ease: EASE_OUT as never });
+    await this.skippableDelay(420);
+    tierEl.textContent = "NO DROP";
+    await this.skippableDelay(260);
+    if (run === this.run) await exit(panel);
+    panel.remove();
+  }
+
+  private revealNoDrop(ctx: OverlayContext, odds: Partial<Record<LootTier, number>> | undefined, run: number, truth?: "no_drop"): void {
     const node = document.createElement("div");
     node.className = "reward-float reward-float--nodrop";
-    node.textContent = "no drop";
-    this.el.appendChild(node);
-    if (ctx.config.no_dark_pattern_mode && odds) {
-      node.appendChild(this.oddsTable(odds));
-    }
-    window.setTimeout(() => node.remove(), 900);
+    node.textContent = truth ? `no drop · truth: ${truth}` : "no drop";
+    if (ctx.config.no_dark_pattern_mode && odds) node.append(this.oddsTable(odds));
+    this.el.append(node);
+    void enter(node);
+    this.removeLater(node, reduceMotion() ? 180 : 460, run);
   }
 
   private oddsTable(odds?: Partial<Record<LootTier, number>>): HTMLElement {
     const table = document.createElement("div");
     table.className = "loot__odds";
-    const src = odds ?? {
-      common: BASE_LOOT_ODDS.common,
-      rare: BASE_LOOT_ODDS.rare,
-      epic: BASE_LOOT_ODDS.epic,
-      legendary: BASE_LOOT_ODDS.legendary,
-    };
+    const src = odds ?? BASE_LOOT_ODDS;
     const header = document.createElement("div");
     header.className = "loot__odds-title";
     header.textContent = "Drop rates";
-    table.appendChild(header);
-    (Object.keys(src) as LootTier[]).forEach((tier) => {
+    table.append(header);
+    for (const tier of Object.keys(src) as LootTier[]) {
       const row = document.createElement("div");
       row.className = "loot__odds-row";
-      const pct = ((src[tier] ?? 0) * 100).toFixed(src[tier]! < 0.01 ? 2 : 1);
-      row.textContent = `${TIER_LABEL[tier]}: ${pct}%`;
-      table.appendChild(row);
-    });
+      const value = src[tier] ?? 0;
+      row.textContent = `${TIER_LABEL[tier]}: ${(value * 100).toFixed(value < .01 ? 2 : 1)}%`;
+      table.append(row);
+    }
     return table;
   }
 
   private skippableDelay(ms: number): Promise<void> {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       let done = false;
       const finish = (): void => {
         if (done) return;
         done = true;
-        this.skipResolve = null;
         clearTimeout(timer);
+        this.skipResolve = null;
         resolve();
       };
       const timer = window.setTimeout(finish, ms);

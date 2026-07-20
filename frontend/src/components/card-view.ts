@@ -4,6 +4,7 @@
 // The component is a dumb view: it emits intent (reveal / grade) via callbacks
 // and never talks to the API or mutates game state itself.
 
+import { animate, bloom, enter, press, reduceMotion, SPRING } from "../motion.ts";
 import { RATING_LABEL, type CardView, type Rating } from "../types.ts";
 
 type Phase = "question" | "answer";
@@ -34,7 +35,7 @@ const SHADOW_BASE_CSS = `
   }
   .card__front { font-size: clamp(40px, 14vw, 88px); font-weight: 900; line-height: 1.05; }
   .card__divider { width: 44%; border: none; border-top: 2px dashed #3a3a5c; margin: 6px 0; }
-  .card__back { font-size: clamp(24px, 7vw, 40px); font-weight: 700; color: var(--neon-lime, #c6ff4a); animation: pop 0.28s ease; }
+  .card__back { font-size: clamp(24px, 7vw, 40px); font-weight: 700; color: var(--neon-lime, #c6ff4a); }
   img { max-width: 100%; height: auto; }
   @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 `;
@@ -55,6 +56,7 @@ export class CardComponent {
   private locked = false;
   private cb: CardCallbacks;
   private pointerStartY: number | null = null;
+  private faceEl: HTMLElement | null = null;
 
   constructor(card: CardView, cb: CardCallbacks) {
     this.card = card;
@@ -66,6 +68,11 @@ export class CardComponent {
     this.el.setAttribute("aria-label", `Card in ${card.deck}`);
     this.render();
     this.wireGestures();
+  }
+
+  /** Play the quiet-luxury card-enter (translateY 12→0, scale .985→1, fade, SPRING). */
+  playEnter(): void {
+    enter(this.el);
   }
 
   getCard(): CardView {
@@ -110,6 +117,31 @@ export class CardComponent {
     this.phase = "answer";
     this.el.classList.add("card--revealed");
     this.render();
+    this.animateReveal();
+  }
+
+  /**
+   * Reveal choreography inside the shadow root: the back content rises 8px and
+   * fades in on the shared SPRING, and the hairline divider draws (scaleX 0→1,
+   * ~200ms). Reduced-motion → no-op (the styles already show both instantly).
+   */
+  private animateReveal(): void {
+    if (reduceMotion()) return;
+    const root = this.faceEl?.shadowRoot;
+    if (!root) return;
+    const divider = root.querySelector<HTMLElement>(".card__divider");
+    if (divider) {
+      divider.style.transformOrigin = "center";
+      animate(divider, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: 0.2, ease: [0.22, 1, 0.36, 1] });
+    }
+    const back = root.querySelector<HTMLElement>(".card__back");
+    if (back) {
+      animate(
+        back,
+        { opacity: [0, 1], transform: ["translateY(8px)", "translateY(0)"] },
+        { type: "spring", ...SPRING },
+      );
+    }
   }
 
   grade(rating: Rating): void {
@@ -193,6 +225,7 @@ export class CardComponent {
     const face = document.createElement("div");
     face.className = "card__face";
     this.renderFace(face);
+    this.faceEl = face;
     this.el.appendChild(face);
 
     if (this.card.tags.length) {
@@ -238,6 +271,10 @@ export class CardComponent {
         btn.append(label, key);
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
+          // Quiet-luxury grade press: spring scale + a single faint accent
+          // ripple blooming from the touch point (both degrade under reduced motion).
+          press(btn);
+          bloom(e.clientX, e.clientY, { size: 120, intensity: 0.4 });
           this.grade(r);
         });
         grades.appendChild(btn);

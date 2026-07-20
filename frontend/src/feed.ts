@@ -18,6 +18,7 @@ import { cache } from "./cache.ts";
 import { CardComponent } from "./components/card-view.ts";
 import { RewardOverlay } from "./components/reward-overlay.ts";
 import { effects } from "./effects.ts";
+import { exit } from "./motion.ts";
 import type { Store } from "./store.ts";
 import type { CardView, Rating } from "./types.ts";
 
@@ -96,6 +97,7 @@ export class Feed {
     this.active = comp;
     comp.el.classList.add("card--active");
     this.slots.appendChild(comp.el);
+    comp.playEnter();
     requestAnimationFrame(() => comp.focus());
   }
 
@@ -224,10 +226,12 @@ export class Feed {
     // One review committed — notify the host (drives "sync & finish" gating).
     this.opts.onReview?.();
 
-    // Animate the answered card out.
+    // Animate the answered card out via the shared exit() (translateY -8 + fade,
+    // ease-out). The card--out class stays so the active-card selector excludes it.
     if (outgoing) {
       outgoing.el.classList.add("card--out");
-      window.setTimeout(() => outgoing.el.remove(), 420);
+      const el = outgoing.el;
+      void exit(el).then(() => el.remove()).catch(() => el.remove());
     }
     this.active = null;
 

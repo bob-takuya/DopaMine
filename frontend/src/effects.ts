@@ -1,78 +1,94 @@
-// Sensory "juice": Web Audio chimes, opt-in haptics, and particle bursts.
-// (ARCHITECTURE §6, research/addiction-ux.md ranks #2/#15/#16/#17.)
-//
-// Guardrails honored here:
-//  - AudioContext is created lazily on first sound (browsers require a gesture).
-//  - Sound respects the mute/sound_enabled toggle AND prefers-reduced-motion.
-//  - Haptics call navigator.vibrate ONLY after explicit opt-in (haptics_enabled).
-//  - No-drop celebratory sound/haptics are suppressed by callers in
-//    no_dark_pattern_mode.
-
+// Restrained sensory effects: soft audio, opt-in Android haptics, sparse embers.
 import type { LootTier, Rating } from "./types.ts";
 
-interface EffectsFlags {
-  soundEnabled: boolean;
-  hapticsEnabled: boolean;
-}
+export interface EffectsFlags { soundEnabled: boolean; hapticsEnabled: boolean }
+export interface BurstOptions { rating?: Rating; tier?: LootTier; x?: number; y?: number }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof matchMedia !== "undefined" &&
-    matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
+const reduced = (): boolean => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const TIER_COLOR: Record<LootTier, string> = {
-  common: "#7cf6c4",
-  rare: "#5db4ff",
-  epic: "#c07bff",
-  legendary: "#ffd23f",
+  common: "#AEB6C2", rare: "#6FE0C6", epic: "#B79CFF", legendary: "#E4C07A",
 };
+const GRADE_COUNT: Record<Rating, number> = { 1: 4, 2: 8, 3: 14, 4: 20 };
 
-const GRADE_PARTICLES: Record<Rating, number> = { 1: 6, 2: 14, 3: 26, 4: 40 };
-const GRADE_HAPTIC: Record<Rating, number | number[]> = {
-  1: 12,
-  2: 20,
-  3: [15, 30, 15],
-  4: [20, 40, 25, 40],
-};
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  maxLife: number;
-  size: number;
-  color: string;
-}
+interface Ember { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; size: number; color: string }
 
 export class Effects {
   private flags: EffectsFlags = { soundEnabled: true, hapticsEnabled: false };
   private ctx: AudioContext | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private c2d: CanvasRenderingContext2D | null = null;
-  private particles: Particle[] = [];
+  private particles: Ember[] = [];
   private raf = 0;
 
-  setFlags(flags: Partial<EffectsFlags>): void {
-    this.flags = { ...this.flags, ...flags };
-  }
+  setFlags(flags: Partial<EffectsFlags>): void { this.flags = { ...this.flags, ...flags }; }
 
   private ensureAudio(): AudioContext | null {
-    if (!this.flags.soundEnabled) return null;
-    if (prefersReducedMotion()) return null;
-    if (!this.ctx) {
-      const AC =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-      if (!AC) return null;
-      this.ctx = new AC();
-    }
+    if (!this.flags.soundEnabled || typeof window === "undefined") return null;
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return null;
+    this.ctx ??= new AC();
     if (this.ctx.state === "suspended") void this.ctx.resume();
     return this.ctx;
+  }
+
+  private tone(freq: number, duration: number, when = 0, gain = .055): void {
+    const ctx = this.ensureAudio();
+    if (!ctx) return;
+    const start = ctx.currentTime + when;
+    const osc = ctx.createOscillator();
+    const volume = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, start);
+    osc.frequency.exponentialRampToValueAtTime(freq * .985, start + duration);
+    volume.gain.setValueAtTime(.0001, start);
+    volume.gain.exponentialRampToValueAtTime(gain, start + .018);
+    volume.gain.exponentialRampToValueAtTime(.0001, start + duration);
+    osc.connect(volume).connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + duration + .02);
+  }
+
+  answerTick(rating: Rating, _combo: number): void {
+    const pitch: Record<Rating, number> = { 1: 170, 2: 190, 3: 215, 4: 240 };
+    this.tone(pitch[rating], .075, 0, .035);
+  }
+
+  comboRise(combo: number): void {
+    const base = 185 + Math.min(combo, 12) * 2;
+    this.tone(base, .12, 0, .035);
+    this.tone(base * 1.2, .14, .055, .025);
+  }
+
+  legendaryChime(): void { this.warmChime(); }
+  levelUpChime(): void { this.warmChime(); }
+  private warmChime(): void {
+    this.tone(146.83, .42, 0, .065);
+    this.tone(220, .46, .07, .045);
+    this.tone(293.66, .5, .14, .03);
+  }
+
+  lootChime(tier: LootTier): void {
+    if (tier === "legendary") this.legendaryChime();
+    else if (tier !== "common") this.tone(tier === "epic" ? 220 : 196, .18, 0, .035);
+  }
+
+  softBlip(): void { this.tone(165, .07, 0, .02); }
+
+  private isAndroid(): boolean {
+    return typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+  }
+
+  private vibrate(pattern: number | number[]): void {
+    if (!this.flags.hapticsEnabled || !this.isAndroid() || typeof navigator.vibrate !== "function") return;
+    navigator.vibrate(pattern);
+  }
+
+  gradeHaptic(rating: Rating): void { this.vibrate(rating >= 3 ? 14 : 9); }
+  lootHaptic(tier: LootTier): void {
+    const pattern: Record<LootTier, number | number[]> = {
+      common: 10, rare: 14, epic: [15, 28, 15], legendary: [18, 34, 22],
+    };
+    this.vibrate(pattern[tier]);
   }
 
   private ensureCanvas(): void {
@@ -81,133 +97,41 @@ export class Effects {
     canvas.className = "fx-canvas";
     canvas.setAttribute("aria-hidden", "true");
     const resize = (): void => {
-      canvas.width = window.innerWidth * devicePixelRatio;
-      canvas.height = window.innerHeight * devicePixelRatio;
-      canvas.style.width = `${window.innerWidth}px`;
-      canvas.style.height = `${window.innerHeight}px`;
+      const dpr = devicePixelRatio;
+      canvas.width = innerWidth * dpr;
+      canvas.height = innerHeight * dpr;
+      canvas.style.width = `${innerWidth}px`;
+      canvas.style.height = `${innerHeight}px`;
     };
     resize();
-    window.addEventListener("resize", resize);
-    document.body.appendChild(canvas);
+    addEventListener("resize", resize);
+    (document.getElementById("fx-layer") ?? document.body).append(canvas);
     this.canvas = canvas;
     this.c2d = canvas.getContext("2d");
   }
 
-  /** A single tone. freq in Hz, dur in seconds. */
-  private tone(freq: number, dur: number, when = 0, type: OscillatorType = "triangle", gain = 0.18): void {
-    const ctx = this.ensureAudio();
-    if (!ctx) return;
-    const t0 = ctx.currentTime + when;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, t0);
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.connect(g).connect(ctx.destination);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.02);
-  }
-
-  /**
-   * Rising-pitch answer tick — pitch climbs with the in-session combo depth so
-   * chains of Good/Easy feel escalating (research #17).
-   */
-  answerTick(rating: Rating, combo: number): void {
-    // Base pitch by grade; ramps up with combo, saturating so it never shrieks.
-    const gradeBase: Record<Rating, number> = { 1: 220, 2: 300, 3: 380, 4: 460 };
-    const base = gradeBase[rating];
-    const climb = Math.min(12, combo) * 28;
-    this.tone(base + climb, 0.12, 0, rating === 1 ? "sine" : "triangle", rating === 1 ? 0.12 : 0.2);
-  }
-
-  levelUpChime(): void {
-    // Ascending arpeggio sting.
-    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this.tone(f, 0.18, i * 0.08, "triangle", 0.22));
-  }
-
-  lootChime(tier: LootTier): void {
-    const seqByTier: Record<LootTier, number[]> = {
-      common: [523.25, 659.25],
-      rare: [523.25, 659.25, 783.99],
-      epic: [659.25, 783.99, 987.77, 1174.66],
-      legendary: [523.25, 783.99, 1046.5, 1318.51, 1567.98],
-    };
-    seqByTier[tier].forEach((f, i) => this.tone(f, 0.22, i * 0.09, "sawtooth", 0.2));
-  }
-
-  /** A soft, non-celebratory blip for no-drop (never used to fake a win). */
-  softBlip(): void {
-    this.tone(180, 0.09, 0, "sine", 0.08);
-  }
-
-  // ---- Haptics (opt-in only) ------------------------------------------------
-
-  private vibrate(pattern: number | number[]): void {
-    if (!this.flags.hapticsEnabled) return;
-    if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
-    navigator.vibrate(pattern);
-  }
-
-  gradeHaptic(rating: Rating): void {
-    this.vibrate(GRADE_HAPTIC[rating]);
-  }
-
-  lootHaptic(tier: LootTier): void {
-    const byTier: Record<LootTier, number[]> = {
-      common: [15],
-      rare: [20, 30, 20],
-      epic: [25, 40, 25, 40],
-      legendary: [30, 50, 30, 50, 60],
-    };
-    this.vibrate(byTier[tier]);
-  }
-
-  // ---- Particles ------------------------------------------------------------
-
-  /**
-   * Particle burst scaled by grade and (optionally) loot rarity. Suppressed
-   * entirely under prefers-reduced-motion.
-   */
-  burst(opts: {
-    rating?: Rating;
-    tier?: LootTier;
-    x?: number;
-    y?: number;
-  }): void {
-    if (prefersReducedMotion()) return;
+  burst(opts: BurstOptions): void {
+    if (reduced()) return;
     this.ensureCanvas();
     if (!this.c2d) return;
-    const cx = (opts.x ?? window.innerWidth / 2) * devicePixelRatio;
-    const cy = (opts.y ?? window.innerHeight * 0.5) * devicePixelRatio;
-
-    let count = opts.rating ? GRADE_PARTICLES[opts.rating] : 20;
-    let colors = ["#ff4fd8", "#4ff0ff", "#c07bff", "#fff27a"];
-    if (opts.tier) {
-      const tierCount: Record<LootTier, number> = {
-        common: 30,
-        rare: 55,
-        epic: 90,
-        legendary: 150,
-      };
-      count = Math.max(count, tierCount[opts.tier]);
-      colors = [TIER_COLOR[opts.tier], "#ffffff", TIER_COLOR[opts.tier]];
-    }
-
+    const dpr = devicePixelRatio;
+    const x = (opts.x ?? innerWidth / 2) * dpr;
+    const y = (opts.y ?? innerHeight * .5) * dpr;
+    const tierCount: Record<LootTier, number> = { common: 6, rare: 14, epic: 24, legendary: 60 };
+    const desired = opts.tier ? tierCount[opts.tier] : opts.rating ? GRADE_COUNT[opts.rating] : 8;
+    const cap = opts.tier === "legendary" ? 60 : 24;
+    const count = Math.max(0, Math.min(desired, cap - this.particles.length));
+    const color = opts.tier ? TIER_COLOR[opts.tier] : "#6FE0C6";
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = (2 + Math.random() * 6) * devicePixelRatio;
-      const maxLife = 40 + Math.random() * 40;
+      const maxLife = 22 + Math.random() * 22;
       this.particles.push({
-        x: cx,
-        y: cy,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - 3 * devicePixelRatio,
-        life: maxLife,
-        maxLife,
-        size: (2 + Math.random() * 4) * devicePixelRatio,
-        color: colors[Math.floor(Math.random() * colors.length)] ?? "#fff",
+        x: x + (Math.random() - .5) * 80 * dpr,
+        y: y + (Math.random() - .5) * 30 * dpr,
+        vx: (Math.random() - .5) * .55 * dpr,
+        vy: (-.45 - Math.random() * 1.1) * dpr,
+        life: maxLife, maxLife,
+        size: (.8 + Math.random() * 1.8) * dpr,
+        color,
       });
     }
     this.startLoop();
@@ -217,31 +141,26 @@ export class Effects {
     if (this.raf) return;
     const step = (): void => {
       const ctx = this.c2d;
-      const canvas = this.canvas;
-      if (!ctx || !canvas) {
-        this.raf = 0;
-        return;
-      }
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const gravity = 0.15 * devicePixelRatio;
+      if (!ctx || !this.canvas) { this.raf = 0; return; }
+      ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.globalCompositeOperation = "lighter";
       this.particles = this.particles.filter((p) => p.life > 0);
       for (const p of this.particles) {
-        p.vy += gravity;
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life -= 1;
-        ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+        p.x += p.vx; p.y += p.vy; p.vx *= .98; p.life--;
+        const progress = p.life / p.maxLife;
+        ctx.globalAlpha = Math.sin(progress * Math.PI) * .42;
+        ctx.shadowBlur = p.size * 4;
+        ctx.shadowColor = p.color;
         ctx.fillStyle = p.color;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.globalAlpha = 1;
-      if (this.particles.length > 0) {
-        this.raf = requestAnimationFrame(step);
-      } else {
-        this.raf = 0;
-      }
+      ctx.shadowBlur = 0;
+      ctx.globalCompositeOperation = "source-over";
+      if (this.particles.length) this.raf = requestAnimationFrame(step);
+      else this.raf = 0;
     };
     this.raf = requestAnimationFrame(step);
   }
