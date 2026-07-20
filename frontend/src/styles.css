@@ -1,20 +1,38 @@
-/* DopaMine — mobile-first dark neon "brainrot" aesthetic.
-   Respects prefers-reduced-motion; uses CSS scroll-snap for the feed. */
+/* DopaMine — Quiet Luxury / Dark. Mobile-first, restrained, one accent. */
 
 :root {
-  --bg: #0a0a12;
-  --bg-2: #12121f;
-  --panel: #1a1a2e;
-  --ink: #f4f4ff;
-  --muted: #9a9ab8;
-  --neon-pink: #ff2fd0;
-  --neon-cyan: #24e0ff;
-  --neon-purple: #a855f7;
-  --neon-lime: #b6ff3d;
-  --neon-gold: #ffd23f;
-  --danger: #ff5470;
-  --ok: #29e0a0;
-  --radius: 20px;
+  --bg: #0b0d12;
+  --bg-1: #10131a;
+  --surface: rgba(255, 255, 255, 0.04);
+  --surface-2: rgba(255, 255, 255, 0.06);
+  --hairline: rgba(255, 255, 255, 0.08);
+  --shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.6);
+  --fg: #eceef3;
+  --fg-2: #9aa3b2;
+  --fg-3: #5c6472;
+  --accent: #6fe0c6;
+  --accent-dim: rgba(111, 224, 198, 0.14);
+  --accent-line: rgba(111, 224, 198, 0.5);
+  --rar-common: #aeb6c2;
+  --rar-rare: #6fe0c6;
+  --rar-epic: #b79cff;
+  --rar-legendary: #e4c07a;
+  --r-card: 20px;
+  --r-chip: 12px;
+  --r-pill: 999px;
+  /* Compatibility aliases retained for existing components and card CSS. */
+  --bg-2: var(--bg-1);
+  --panel: var(--surface-2);
+  --ink: var(--fg);
+  --muted: var(--fg-2);
+  --neon-pink: var(--accent);
+  --neon-cyan: var(--accent);
+  --neon-purple: var(--fg-2);
+  --neon-lime: var(--accent);
+  --neon-gold: var(--rar-legendary);
+  --danger: #d9828f;
+  --ok: var(--accent);
+  --radius: var(--r-card);
   --hud-h: 64px;
 }
 
@@ -31,8 +49,28 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E");
+}
+
+.glass {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 #app {
@@ -44,6 +82,13 @@ button {
   cursor: pointer;
 }
 
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: 3px;
+}
+
 /* ---- Banner (mock / offline) ---- */
 .banner {
   position: fixed;
@@ -53,17 +98,18 @@ button {
   z-index: 50;
   padding: 6px 12px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   text-align: center;
   letter-spacing: 0.02em;
 }
 .banner--mock {
-  background: linear-gradient(90deg, var(--neon-purple), var(--neon-pink));
-  color: #fff;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--fg-2);
 }
 .banner--offline {
-  background: #3a2a00;
-  color: var(--neon-gold);
+  background: var(--bg-1);
+  color: var(--rar-legendary);
 }
 
 /* ---- Deck picker ---- */
@@ -79,17 +125,14 @@ button {
 }
 .picker__title {
   font-size: 44px;
-  font-weight: 900;
+  font-weight: 600;
   margin: 0;
   letter-spacing: -0.03em;
-  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-pink));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--fg);
 }
 .picker__title span {
-  color: var(--neon-gold);
-  -webkit-text-fill-color: var(--neon-gold);
+  color: var(--accent);
+  -webkit-text-fill-color: var(--accent);
 }
 .picker__sub {
   color: var(--muted);
@@ -103,7 +146,7 @@ button {
   font-size: 13px;
 }
 .picker__mock {
-  color: var(--neon-purple);
+  color: var(--fg-3);
 }
 .deck-list {
   display: flex;
@@ -116,18 +159,19 @@ button {
   align-items: center;
   padding: 18px 18px;
   border-radius: var(--radius);
-  border: 1px solid #2a2a44;
-  background: var(--panel);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  box-shadow: var(--shadow);
   color: var(--ink);
   text-align: left;
   transition: transform 0.12s ease, border-color 0.12s ease;
 }
 .deck-card:hover {
-  border-color: var(--neon-cyan);
+  border-color: var(--accent-line);
   transform: translateY(-2px);
 }
 .deck-card__name {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 17px;
 }
 .deck-card__stats {
@@ -149,22 +193,22 @@ button {
   border-radius: 999px;
   padding: 15px 20px;
   font-size: 16px;
-  font-weight: 800;
-  color: #12001a;
-  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-lime));
-  box-shadow: 0 6px 24px rgba(36, 224, 255, 0.35);
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  box-shadow: 0 8px 24px -12px var(--accent-line);
 }
 .primary-btn:disabled {
   opacity: 0.6;
 }
 .ghost-btn {
-  border: 1px solid #33334f;
+  border: 1px solid var(--hairline);
   border-radius: 999px;
   padding: 13px 20px;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--ink);
-  background: transparent;
+  background: var(--surface);
 }
 
 /* Import .apkg — styled label wrapping a real (visually hidden) file input. */
@@ -203,21 +247,23 @@ button {
   padding: 13px 18px;
   border-radius: 14px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.35;
   text-align: center;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.22s ease, transform 0.22s ease;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
 }
 .toast--show {
   opacity: 1;
   transform: translate(-50%, 0);
 }
 .toast--success {
-  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-lime));
-  color: #08131a;
+  background: var(--bg-1);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
 }
 .toast--error {
   background: rgba(255, 84, 112, 0.16);
@@ -242,13 +288,13 @@ button {
   left: 10px;
   bottom: calc(env(safe-area-inset-bottom) + 10px);
   z-index: 30;
-  border: 1px solid #33334f;
-  background: rgba(18, 18, 31, 0.8);
+  border: 1px solid var(--hairline);
+  background: rgba(16, 19, 26, 0.82);
   color: var(--muted);
   border-radius: 999px;
   padding: 8px 14px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   backdrop-filter: blur(8px);
 }
 
@@ -259,15 +305,15 @@ button {
   right: 10px;
   bottom: calc(env(safe-area-inset-bottom) + 10px);
   z-index: 30;
-  border: 1px solid rgba(36, 224, 255, 0.6);
-  background: rgba(18, 18, 31, 0.82);
-  color: var(--neon-cyan);
+  border: 1px solid var(--accent-line);
+  background: rgba(16, 19, 26, 0.82);
+  color: var(--accent);
   border-radius: 999px;
   padding: 8px 16px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
   backdrop-filter: blur(8px);
-  box-shadow: 0 4px 18px rgba(36, 224, 255, 0.25);
+  box-shadow: var(--shadow);
 }
 .sync-finish-btn:disabled {
   opacity: 0.6;
@@ -283,7 +329,7 @@ button {
 .finish-summary {
   margin: 4px 0 14px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
 }
 
@@ -308,8 +354,8 @@ button {
   flex-direction: column;
   padding: 18px 18px calc(env(safe-area-inset-bottom) + 18px);
   scroll-snap-align: start;
-  background: radial-gradient(120% 80% at 50% 0%, #191933 0%, var(--bg) 70%);
-  transition: transform 0.42s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.42s ease;
+  background: radial-gradient(120% 80% at 50% 0%, var(--bg-1) 0%, var(--bg) 72%);
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
   will-change: transform, opacity;
   outline: none;
 }
@@ -318,13 +364,13 @@ button {
 }
 .card--prefetch {
   z-index: 5;
-  transform: translateY(6%) scale(0.94);
-  opacity: 0.35;
-  filter: blur(1px);
+  transform: translateY(12px) scale(0.985);
+  opacity: 0.92;
+  filter: brightness(0.92);
   pointer-events: none;
 }
 .card--out {
-  transform: translateY(-115%) rotate(-3deg);
+  transform: translateY(-8px);
   opacity: 0;
 }
 .card--locked {
@@ -333,11 +379,11 @@ button {
 .card__deck {
   align-self: flex-start;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--neon-cyan);
-  border: 1px solid rgba(36, 224, 255, 0.4);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
   border-radius: 999px;
   padding: 4px 10px;
   margin-bottom: 12px;
@@ -353,20 +399,20 @@ button {
 }
 .card__front {
   font-size: clamp(40px, 14vw, 88px);
-  font-weight: 900;
+  font-weight: 600;
   line-height: 1.05;
 }
 .card__divider {
   width: 44%;
   border: none;
-  border-top: 2px dashed #3a3a5c;
+  border-top: 1px solid var(--hairline);
   margin: 6px 0;
 }
 .card__back {
   font-size: clamp(24px, 7vw, 40px);
-  font-weight: 700;
-  color: var(--neon-lime);
-  animation: pop 0.28s ease;
+  font-weight: 600;
+  color: var(--accent);
+  animation: pop 0.34s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .card__tags {
   display: flex;
@@ -377,7 +423,8 @@ button {
 .tag-chip {
   font-size: 11px;
   color: var(--muted);
-  background: #20203a;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
   border-radius: 999px;
   padding: 3px 9px;
 }
@@ -386,13 +433,13 @@ button {
 }
 .reveal-btn {
   width: 100%;
-  border: 1px dashed #3a3a5c;
-  background: rgba(26, 26, 46, 0.6);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
   color: var(--muted);
   border-radius: var(--radius);
   padding: 16px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 /* Grade buttons */
@@ -406,8 +453,8 @@ button {
   border: none;
   border-radius: 16px;
   padding: 16px 6px 20px;
-  font-weight: 800;
-  color: #0a0a12;
+  font-weight: 600;
+  color: var(--fg);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -430,18 +477,23 @@ button {
   opacity: 0.6;
 }
 .grade-btn--1 {
-  background: linear-gradient(180deg, #ff6a8b, var(--danger));
-  color: #fff;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--fg-2);
 }
 .grade-btn--2 {
-  background: linear-gradient(180deg, #ffc06a, #ff9838);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
 }
 .grade-btn--3 {
-  background: linear-gradient(180deg, #7cf6c4, var(--ok));
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
 }
 .grade-btn--4 {
-  background: linear-gradient(180deg, var(--neon-cyan), #4b8bff);
-  color: #fff;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  color: var(--fg);
 }
 
 /* Card error / retry */
@@ -462,9 +514,9 @@ button {
   border: none;
   border-radius: 999px;
   padding: 8px 16px;
-  font-weight: 800;
-  background: var(--danger);
-  color: #fff;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--fg);
 }
 
 /* ---- HUD ---- */
@@ -475,7 +527,7 @@ button {
   justify-content: space-between;
   gap: 8px;
   padding: calc(env(safe-area-inset-top) + 4px) 12px 4px;
-  background: linear-gradient(180deg, rgba(10, 10, 18, 0.95), rgba(10, 10, 18, 0));
+  background: linear-gradient(180deg, rgba(11, 13, 18, 0.96), rgba(11, 13, 18, 0));
   position: relative;
   z-index: 20;
 }
@@ -493,29 +545,31 @@ button {
   display: flex;
   align-items: center;
   gap: 3px;
-  font-weight: 900;
+  font-weight: 600;
   font-size: 15px;
 }
 .hud__streak--frozen .flame {
-  filter: hue-rotate(160deg);
+  filter: grayscale(1) opacity(0.6);
 }
 .flame {
-  filter: drop-shadow(0 0 6px var(--neon-gold));
+  filter: drop-shadow(0 0 5px var(--accent-dim));
 }
 .flame--cold {
   filter: grayscale(1) opacity(0.5);
 }
 .hud__streak-num {
-  color: var(--neon-gold);
+  color: var(--accent);
 }
 .hud__combo {
   font-size: 12px;
-  font-weight: 900;
-  color: var(--neon-pink);
+  font-weight: 600;
+  color: var(--accent);
   min-height: 14px;
 }
 .hud__combo--on {
-  text-shadow: 0 0 10px var(--neon-pink);
+  background: var(--accent-dim);
+  border-radius: var(--r-pill);
+  padding: 2px 7px;
 }
 .hud__combo--pulse {
   animation: pop 0.32s ease;
@@ -527,7 +581,7 @@ button {
 }
 .hud__level {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   color: var(--neon-cyan);
   white-space: nowrap;
 }
@@ -535,7 +589,7 @@ button {
   flex: 1;
   height: 10px;
   border-radius: 999px;
-  background: #20203a;
+  background: var(--surface-2);
   overflow: hidden;
   min-width: 60px;
 }
@@ -543,7 +597,7 @@ button {
   height: 100%;
   width: 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--neon-cyan), var(--neon-pink));
+  background: var(--accent);
   transition: width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .hud__xp-label {
@@ -563,7 +617,7 @@ button {
 }
 .ring-track {
   fill: none;
-  stroke: #20203a;
+  stroke: var(--surface-2);
   stroke-width: 5;
 }
 .ring-progress {
@@ -574,8 +628,8 @@ button {
   transition: stroke-dashoffset 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .ring-progress--done {
-  stroke: var(--neon-gold);
-  filter: drop-shadow(0 0 6px var(--neon-gold));
+  stroke: var(--accent);
+  filter: drop-shadow(0 0 5px var(--accent-dim));
 }
 .ring-label {
   position: absolute;
@@ -584,11 +638,11 @@ button {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
 }
 .hud__cap {
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -625,27 +679,26 @@ button {
   position: absolute;
   top: 30%;
   font-size: 34px;
-  font-weight: 900;
-  animation: floatUp 0.7s ease forwards;
-  text-shadow: 0 0 16px currentColor;
+  font-weight: 600;
+  animation: floatUp 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 .reward-float--xp {
   color: var(--neon-lime);
 }
 .reward-float--combo {
-  color: var(--neon-pink);
+  color: var(--accent);
   top: 40%;
   font-size: 24px;
 }
 .reward-float--streak {
-  color: var(--neon-gold);
+  color: var(--accent);
   top: 22%;
   font-size: 22px;
 }
 .reward-float--nodrop {
   color: var(--muted);
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
   text-shadow: none;
   animation: fadeOut 0.9s ease forwards;
   display: flex;
@@ -664,14 +717,13 @@ button {
 .levelup__flash {
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle, rgba(255, 210, 63, 0.35), transparent 60%);
+  background: radial-gradient(circle, var(--accent-dim), transparent 60%);
   animation: fadeOut 1.4s ease forwards;
 }
 .levelup__text {
   font-size: 40px;
-  font-weight: 900;
-  color: var(--neon-gold);
-  text-shadow: 0 0 24px var(--neon-gold);
+  font-weight: 600;
+  color: var(--accent);
   animation: pop 0.5s ease;
 }
 
@@ -684,56 +736,53 @@ button {
   gap: 10px;
   padding: 26px 30px;
   border-radius: 24px;
-  background: rgba(18, 18, 31, 0.92);
-  border: 2px solid #33334f;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-  animation: pop 0.3s ease;
+  background: rgba(16, 19, 26, 0.94);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+  animation: pop 0.36s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .loot--common {
-  border-color: #7cf6c4;
+  border-color: color-mix(in srgb, var(--rar-common) 45%, transparent);
 }
 .loot--rare {
-  border-color: #5db4ff;
-  box-shadow: 0 0 50px rgba(93, 180, 255, 0.5);
+  border-color: color-mix(in srgb, var(--rar-rare) 50%, transparent);
 }
 .loot--epic {
-  border-color: #c07bff;
-  box-shadow: 0 0 60px rgba(192, 123, 255, 0.6);
+  border-color: color-mix(in srgb, var(--rar-epic) 50%, transparent);
 }
 .loot--legendary {
-  border-color: var(--neon-gold);
-  box-shadow: 0 0 80px rgba(255, 210, 63, 0.7);
+  border-color: color-mix(in srgb, var(--rar-legendary) 55%, transparent);
 }
 .loot--out {
   animation: fadeOut 0.26s ease forwards;
 }
 .loot__chest {
   font-size: 64px;
-  animation: shake 0.5s ease infinite;
+  animation: none;
 }
 .loot--suspense .loot__chest {
-  animation: shake 0.22s ease infinite;
+  animation: glimmer 0.52s cubic-bezier(0.22, 1, 0.36, 1) 1;
 }
 .loot__tier {
   font-size: 22px;
-  font-weight: 900;
+  font-weight: 600;
   letter-spacing: 0.06em;
 }
 .loot--common .loot__tier {
-  color: #7cf6c4;
+  color: var(--rar-common);
 }
 .loot--rare .loot__tier {
-  color: #5db4ff;
+  color: var(--rar-rare);
 }
 .loot--epic .loot__tier {
-  color: #c07bff;
+  color: var(--rar-epic);
 }
 .loot--legendary .loot__tier {
-  color: var(--neon-gold);
+  color: var(--rar-legendary);
 }
 .loot__item {
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .loot__item--miss {
   color: var(--muted);
@@ -741,7 +790,7 @@ button {
 .loot__pity {
   font-size: 11px;
   color: var(--neon-gold);
-  font-weight: 800;
+  font-weight: 600;
 }
 .loot__skip {
   font-size: 10px;
@@ -752,13 +801,13 @@ button {
 .loot__odds {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid #33334f;
+  border-top: 1px solid var(--hairline);
   font-size: 11px;
   color: var(--muted);
   width: 100%;
 }
 .loot__odds-title {
-  font-weight: 800;
+  font-weight: 600;
   color: var(--ink);
   margin-bottom: 3px;
 }
@@ -781,7 +830,7 @@ button {
 }
 .feed-screen h2 {
   font-size: 26px;
-  font-weight: 900;
+  font-weight: 600;
   margin: 0;
 }
 .feed-screen p {
@@ -809,19 +858,21 @@ button {
   max-width: 520px;
   max-height: 88vh;
   overflow-y: auto;
-  background: var(--bg-2);
+  background: var(--bg-1);
   border-radius: 24px 24px 0 0;
-  border-top: 2px solid #33334f;
+  border-top: 1px solid var(--hairline);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
   padding: 22px 20px calc(env(safe-area-inset-bottom) + 20px);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  animation: sheetUp 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: sheetUp 0.34s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .sheet h2 {
   margin: 0;
   font-size: 22px;
-  font-weight: 900;
+  font-weight: 600;
 }
 .sheet__note {
   margin: 0;
@@ -835,7 +886,7 @@ button {
   justify-content: space-between;
   gap: 14px;
   padding: 12px 0;
-  border-bottom: 1px solid #23233c;
+  border-bottom: 1px solid var(--hairline);
 }
 .toggle-row__info {
   display: flex;
@@ -843,7 +894,7 @@ button {
   gap: 2px;
 }
 .toggle-row__label {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 15px;
 }
 .toggle-row__desc {
@@ -853,17 +904,17 @@ button {
 .toggle-row__input {
   width: 22px;
   height: 22px;
-  accent-color: var(--neon-cyan);
+  accent-color: var(--accent);
   flex-shrink: 0;
 }
 .cap-select {
   background: var(--panel);
   color: var(--ink);
-  border: 1px solid #33334f;
+  border: 1px solid var(--hairline);
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .sheet__transparency {
   font-size: 12px;
@@ -898,7 +949,7 @@ button {
 .sync-input {
   background: var(--panel);
   color: var(--ink);
-  border: 1px solid #33334f;
+  border: 1px solid var(--hairline);
   border-radius: 12px;
   padding: 13px 14px;
   font-size: 15px;
@@ -909,7 +960,7 @@ button {
 }
 .sync-input:focus {
   outline: none;
-  border-color: var(--neon-cyan);
+  border-color: var(--accent-line);
 }
 .sync-actions {
   display: flex;
@@ -924,18 +975,18 @@ button {
   border-radius: 12px;
   padding: 12px 14px;
   background: var(--panel);
-  border: 1px solid #23233c;
+  border: 1px solid var(--hairline);
 }
 .sync-note--info {
-  color: var(--neon-cyan);
-  border-color: rgba(36, 224, 255, 0.4);
-  background: rgba(36, 224, 255, 0.08);
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-dim);
 }
 .sync-note--ok {
   color: var(--ok);
   border-color: rgba(41, 224, 160, 0.4);
   background: rgba(41, 224, 160, 0.08);
-  font-weight: 700;
+  font-weight: 600;
 }
 .sync-note--warn {
   color: var(--neon-gold);
@@ -950,7 +1001,7 @@ button {
 /* Advanced / bootstrap: collapsible destructive full-sync controls. */
 .sync-advanced {
   margin-top: 4px;
-  border: 1px solid #23233c;
+  border: 1px solid var(--hairline);
   border-radius: 12px;
   padding: 10px 14px;
   background: var(--panel);
@@ -961,7 +1012,7 @@ button {
 .sync-advanced__summary {
   cursor: pointer;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
   list-style: revert;
 }
@@ -977,14 +1028,32 @@ button {
   pointer-events: none;
 }
 
+#fx-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bloom {
+  --bloom-color: var(--accent-dim);
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+  background: radial-gradient(circle, var(--bloom-color) 0%, transparent 70%);
+  mix-blend-mode: screen;
+  will-change: transform, opacity;
+}
+
 /* ---- Animations ---- */
 @keyframes pop {
   0% {
-    transform: scale(0.6);
+    transform: translateY(8px) scale(0.985);
     opacity: 0;
   }
   60% {
-    transform: scale(1.12);
+    transform: translateY(0) scale(1.015);
     opacity: 1;
   }
   100% {
@@ -993,15 +1062,15 @@ button {
 }
 @keyframes floatUp {
   0% {
-    transform: translateY(20px) scale(0.8);
+    transform: translateY(8px) scale(0.985);
     opacity: 0;
   }
   25% {
-    transform: translateY(0) scale(1.1);
+    transform: translateY(0) scale(1.015);
     opacity: 1;
   }
   100% {
-    transform: translateY(-60px) scale(1);
+    transform: translateY(-16px) scale(1);
     opacity: 0;
   }
 }
@@ -1023,20 +1092,15 @@ button {
 }
 @keyframes sheetUp {
   from {
-    transform: translateY(100%);
+    transform: translateY(12px);
+    opacity: 0;
   }
   to {
     transform: translateY(0);
   }
 }
-@keyframes shake {
-  0%,
-  100% {
-    transform: rotate(-6deg);
-  }
-  50% {
-    transform: rotate(6deg);
-  }
+@keyframes glimmer {
+  50% { filter: brightness(1.08); }
 }
 
 /* ---- Reduced motion: strip animations/transitions ---- */
@@ -1055,6 +1119,10 @@ button {
     animation: none;
   }
   .fx-canvas {
+    display: none;
+  }
+  #fx-layer,
+  .bloom {
     display: none;
   }
 }
