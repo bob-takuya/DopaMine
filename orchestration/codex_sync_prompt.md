@@ -7,7 +7,7 @@ READ FIRST: orchestration/sync_api_notes.md (VERIFIED anki 26.5 sync API), backe
 backend/app/repository.py (config get/set + CONFIG_KEYS allowlist), backend/app/main.py (routes, engine()/repo()/
 coordinator(), ApiError, CORS).
 
-Venv: ~/anki-addiction/.venv/bin/python (anki==26.5). Sync ONLY works with AnkiLibEngine (a real
+Venv: ./.venv/bin/python (anki==26.5). Sync ONLY works with AnkiLibEngine (a real
 collection); the FSRS fallback cannot sync — the endpoints must return 501 SYNC_UNSUPPORTED when the active engine
 lacks the sync methods.
 
@@ -61,6 +61,6 @@ TESTS — backend/tests/test_sync_api.py (fastapi TestClient):
 - If anki is importable, a light AnkiLibEngine test that sync_login with obviously-bad creds raises/maps to an error
   (network permitting; if it can't reach AnkiWeb, skip that one).
 
-RUN: ~/anki-addiction/.venv/bin/python -m pytest backend/tests/test_sync_api.py -q then FULL
+RUN: ./.venv/bin/python -m pytest backend/tests/test_sync_api.py -q then FULL
 backend/tests/ -q. Fix until green. Report: the real SyncOutput/required enum you found, the endpoints, how the hkey
 is protected, and pytest output.

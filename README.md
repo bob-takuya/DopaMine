@@ -10,14 +10,14 @@ A personal experiment that wraps real Anki spaced-repetition scheduling (FSRS) i
 
 | | |
 |---|---|
-| ✅ Works | Backend: FastAPI app with two SRS engines — `AnkiLibEngine` (drives the real `anki` Python library, V3 scheduler + FSRS) and `FsrsSqliteEngine` (standalone `fsrs` + SQLite). Backend test suite: **84 passed** (re-run 2026-09-28 on Python 3.12 with `anki` 26.9.3 / `fsrs` 6.3.2, from the repo root). |
-| ✅ Works | Reward layer (`backend/app/game/rewards.py`): XP, combo, streak, loot roll with pity counters, near-miss flag; ethics toggles (`session_length_cap_minutes` → `429 SESSION_CAP_REACHED`, `honest_streak_mode`, `no_dark_pattern_mode` with a "Continue" gate every 10 reviews). Covered by unit tests. |
-| ✅ Works | `.apkg` import (legacy and zstd `anki21b` packages, media + CSS), media serving, template rendering — covered by backend tests with fixture decks. |
-| ✅ Works | Frontend (Vite + TypeScript) strict build (`npm run build`) succeeds; in-browser mock mode (`?mock=1`) needs no backend. |
-| 🚧 Partial | AnkiWeb sync endpoints exist (Anki engine only) but are tested against fakes; not verified here against a live AnkiWeb account. |
-| 🚧 Partial | Playwright E2E specs (6 specs in `frontend/e2e/`) hard-code machine-specific absolute paths in `playwright.config.ts` and two specs, so they will not run on another machine without editing. Not re-run. |
-| 🚧 Partial | Deployment configs (`Dockerfile`, `fly.toml`, `railway.json`, GitHub Pages workflow) are included but were not verified for this README. |
-| ⚠️ Known issues | `scripts/dev.sh` / `serve.sh` expect a virtualenv at `.venv/` in the repo root (not committed). Backend tests resolve fixture paths relative to the working directory — run them from the repo root. `frontend/dist/` is committed. No LICENSE file (see License). |
+| Works | Backend: FastAPI app with two SRS engines — `AnkiLibEngine` (drives the real `anki` Python library, V3 scheduler + FSRS) and `FsrsSqliteEngine` (standalone `fsrs` + SQLite). Backend test suite: **84 passed** (re-run 2026-09-28 on Python 3.12 with `anki` 26.9.3 / `fsrs` 6.3.2, from the repo root). |
+| Works | Reward layer (`backend/app/game/rewards.py`): XP, combo, streak, loot roll with pity counters, near-miss flag; ethics toggles (`session_length_cap_minutes` → `429 SESSION_CAP_REACHED`, `honest_streak_mode`, `no_dark_pattern_mode` with a "Continue" gate every 10 reviews). Covered by unit tests. |
+| Works | `.apkg` import (legacy and zstd `anki21b` packages, media + CSS), media serving, template rendering — covered by backend tests with fixture decks. |
+| Works | Frontend (Vite + TypeScript) strict build (`npm run build`) succeeds; in-browser mock mode (`?mock=1`) needs no backend. |
+| Partial | AnkiWeb sync endpoints exist (Anki engine only) but are tested against fakes; not verified here against a live AnkiWeb account. |
+| Partial | Playwright E2E specs (6 specs in `frontend/e2e/`). Paths are now resolved relative to the repo, but the suite has not been re-run since then. |
+| Partial | Deployment configs (`Dockerfile`, `fly.toml`, `railway.json`, GitHub Pages workflow) are included but were not verified for this README. |
+| Known issues | `scripts/dev.sh` / `serve.sh` expect a virtualenv at `.venv/` in the repo root (not committed). Backend tests resolve fixture paths relative to the working directory — run them from the repo root. `frontend/dist/` is committed. |
 
 **Development note:** the repository states it was built by a mixed Codex + Claude agent team orchestrated by Claude. The agent prompts, notes and logs are kept in `orchestration/` for transparency.
 
@@ -76,7 +76,7 @@ Open the page, tap **Seed demo deck**, and swipe. `http://localhost:5173/?mock=1
 ```bash
 python -m pytest backend/tests/ -q    # run from the repo root
 cd frontend && npm run build          # strict TS build
-# npm run e2e requires editing the hard-coded paths first (see Status)
+# npm run e2e   (needs the backend venv at .venv/; not re-run recently, see Status)
 ```
 
 ## Repo layout
@@ -98,4 +98,4 @@ orchestration/       agent prompts, notes and logs from the build
 
 ## License
 
-No license file is included yet, so all rights are reserved by default. Note that the primary engine links the `anki` library, which is **AGPL-3.0**; any distribution using the Anki engine is subject to those terms. The `fsrs` fallback path avoids that dependency.
+AGPL-3.0 — see [LICENSE](LICENSE). The primary engine links the `anki` library, which is itself AGPL-3.0, so this project uses the same license.

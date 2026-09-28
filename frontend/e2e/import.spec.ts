@@ -6,10 +6,12 @@
 // core-loop spec and does not depend on import.
 
 import { test, expect } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 
 const BACKEND = "http://localhost:8000";
-const FIXTURE =
-  "~/anki-addiction/backend/tests/fixtures/jlpt_n5.apkg";
+const FIXTURE = fileURLToPath(
+  new URL("../../backend/tests/fixtures/jlpt_n5.apkg", import.meta.url),
+);
 
 test("import an .apkg deck and study an imported card", async ({ page, request }) => {
   await page.goto("/");

@@ -19,7 +19,7 @@
 
 ## What actually installed & ran on THIS machine (Python 3.14.6)
 
-Two isolated venvs under `~/anki-addiction/temp/`.
+Two isolated venvs under `./temp/`.
 
 ### `venv_anki` — `pip install anki`  ✅
 ```

@@ -2,7 +2,7 @@
 # End-to-end integration: drive a real study session against the live backend.
 set -e
 API=http://127.0.0.1:8000
-PY=~/anki-addiction/.venv/bin/python
+PY="$(cd "$(dirname "$0")/.." && pwd)/.venv/bin/python"
 uuid() { $PY -c "import uuid;print(uuid.uuid4())"; }
 
 echo "### Driving a 12-review live session (fsrs engine) ###"

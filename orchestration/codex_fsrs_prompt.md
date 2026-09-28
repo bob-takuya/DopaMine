@@ -6,7 +6,7 @@ READ FIRST:
 - backend/ENGINE_NOTES.md (VERIFIED fsrs 6.3.1 API — use exactly this)
 - backend/app/srs/base.py (the Protocol you must satisfy: CardView, AnswerResult, DeckInfo, SrsStats, Rating)
 
-Use the project venv Python at ~/anki-addiction/.venv/bin/python (has fsrs==6.3.1, pytest).
+Use the project venv Python at ./.venv/bin/python (has fsrs==6.3.1, pytest).
 
 Implement backend/app/srs/fsrs_sqlite.py:
 - class FsrsSqliteEngine implementing AnkiEngine (structurally), backed by its own SQLite file `srs.sqlite3`
@@ -33,5 +33,5 @@ Write backend/tests/test_fsrs_engine.py: create an engine on a tmp sqlite, add_n
 answer it Good, assert next_due_at is in the future and interval_days>=0, assert reviewed_today increments, assert
 unknown card_id raises. Round-trip persistence: reopen engine on same db, state survives.
 
-RUN: ~/anki-addiction/.venv/bin/python -m pytest backend/tests/test_fsrs_engine.py -q
+RUN: ./.venv/bin/python -m pytest backend/tests/test_fsrs_engine.py -q
 Fix until green. Do NOT touch base.py, rewards.py, or any frontend/anki_lib file. Report final pytest output.

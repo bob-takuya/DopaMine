@@ -2,7 +2,7 @@ You are Codex on the DopaMine team. Add two capabilities to the FSRS-fallback im
 support and (B) note-type template rendering (multi-field + cloze). You own backend/app/srs/fsrs_sqlite.py.
 
 READ FIRST: docs/IMPORT_AND_E2E.md, backend/app/srs/fsrs_sqlite.py (your existing import_apkg + _apkg_deck_names).
-Venv python: ~/anki-addiction/.venv/bin/python (has zstandard==0.25.0, anki==26.5 for cross-checking).
+Venv python: ./.venv/bin/python (has zstandard==0.25.0, anki==26.5 for cross-checking).
 
 VERIFIED FACTS (established live):
 - Anki packs BOTH a modern and a legacy collection in a package. A modern export (legacy=False) contains
@@ -55,6 +55,6 @@ TESTS — backend/tests/test_import_rich.py:
   raw "{{c1::" markup, and BACK reveals "Tokyo". Assert notes_imported counts are right.
 - Keep the existing test_import_fsrs.py passing (jlpt_n5 legacy Basic still imports 12 and renders 犬/dog).
 
-RUN: ~/anki-addiction/.venv/bin/python -m pytest backend/tests/test_import_rich.py backend/tests/test_import_fsrs.py -q  then the FULL suite backend/tests/ -q. Fix until all green.
+RUN: ./.venv/bin/python -m pytest backend/tests/test_import_rich.py backend/tests/test_import_fsrs.py -q  then the FULL suite backend/tests/ -q. Fix until all green.
 Do NOT touch anki_lib.py, main.py, rewards.py, base.py, or frontend/*. Only fsrs_sqlite.py, pyproject.toml, and the new test.
 Report: member-selection order, how you render cloze, and final pytest output.

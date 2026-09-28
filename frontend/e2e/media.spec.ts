@@ -12,9 +12,11 @@
 // depend on media at all.
 
 import { test, expect } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 
-const FIXTURE =
-  "~/anki-addiction/backend/tests/fixtures/media_css.apkg";
+const FIXTURE = fileURLToPath(
+  new URL("../../backend/tests/fixtures/media_css.apkg", import.meta.url),
+);
 
 // The fixture's own deck name (imported verbatim, no prefix) and the styled
 // cyan the note-type CSS paints `.word` with.

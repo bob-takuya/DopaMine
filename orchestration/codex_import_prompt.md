@@ -5,7 +5,7 @@ READ FIRST:
 - backend/app/srs/base.py — the NEW `ImportSummary` dataclass and `ApkgImporter` Protocol you must satisfy.
 - backend/app/srs/fsrs_sqlite.py — your existing engine; reuse its `add_note(...)`.
 
-Use venv python: ~/anki-addiction/.venv/bin/python
+Use venv python: ./.venv/bin/python
 
 There is a real fixture at backend/tests/fixtures/jlpt_n5.apkg (genanki-made: a zip with a PLAIN sqlite
 `collection.anki2` + a `media` file; deck `Imported::JLPT N5`; 12 Basic notes like 犬/dog).
@@ -28,6 +28,6 @@ Write backend/tests/test_import_fsrs.py: import the fixture into a fresh engine 
 notes_imported==12, 'Imported::JLPT N5' in decks, then next_card(deck='Imported::JLPT N5') returns an imported
 card and it can be answered. Also test the into_deck override path and that a bogus/non-zip file raises cleanly.
 
-RUN: ~/anki-addiction/.venv/bin/python -m pytest backend/tests/test_import_fsrs.py -q  and fix until green.
+RUN: ./.venv/bin/python -m pytest backend/tests/test_import_fsrs.py -q  and fix until green.
 Do NOT touch base.py, anki_lib.py, main.py, or frontend/*. Only edit fsrs_sqlite.py and add the test.
 Report the final pytest output and the deck/note counts you observed.

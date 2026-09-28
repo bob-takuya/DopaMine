@@ -9,9 +9,11 @@
 
 import { defineConfig, devices } from "@playwright/test";
 import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const PROJECT_ROOT = "~/anki-addiction";
+// Repo root (this file lives in frontend/).
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BACKEND_DIR = join(PROJECT_ROOT, "backend");
 const VENV_PYTHON = join(PROJECT_ROOT, ".venv", "bin", "python");
 

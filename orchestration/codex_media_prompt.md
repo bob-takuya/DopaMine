@@ -5,7 +5,7 @@ READ FIRST: backend/app/srs/base.py — note the NEW `CardView.css: str = ""` fi
 Protocol (`open_media(self, name: str) -> bytes | None`) you must implement. Also backend/app/srs/fsrs_sqlite.py
 (your existing import_apkg, _render_apkg_note, _apkg_models, schema).
 
-Venv python: ~/anki-addiction/.venv/bin/python (has zstandard, anki for cross-check).
+Venv python: ./.venv/bin/python (has zstandard, anki for cross-check).
 Fixtures: backend/tests/fixtures/media_css.apkg (genanki: model "StyledImg" WITH css, deck "Media::Styled",
 2 notes referencing <img src="dot.png">, media map {"0":"dot.png"}, member layout: collection.anki2 + media + "0").
 Also the earlier fixtures still exist (jlpt_n5, rich_legacy, modern_zstd).
@@ -41,5 +41,5 @@ TESTS — backend/tests/test_import_media_css.py:
   front_html still contains `<img src="dot.png">` (original name, unrewritten) and the rendered `<div class="word">ねこ`.
 - Keep every existing test passing (Basic notes get css="").
 
-RUN: ~/anki-addiction/.venv/bin/python -m pytest backend/tests/test_import_media_css.py backend/tests/test_import_rich.py backend/tests/test_import_fsrs.py -q  then FULL backend/tests/ -q. Fix until green.
+RUN: ./.venv/bin/python -m pytest backend/tests/test_import_media_css.py backend/tests/test_import_rich.py backend/tests/test_import_fsrs.py -q  then FULL backend/tests/ -q. Fix until green.
 Report: how you handled legacy vs modern media, the css source, and final pytest output.
