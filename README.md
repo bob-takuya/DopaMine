@@ -1,122 +1,101 @@
-# 🧠⚡ DopaMine — Anki 魔改造 (dopamine-brainrot wrapper for spaced repetition)
+# DopaMine
 
-DopaMine wraps the **real Anki spaced-repetition ecosystem** in a TikTok/gacha-style dopamine
-interface for the ドパガキ generation. You swipe through a vertical feed of flashcards; every grade
-is a **real FSRS review** under the hood, then a variable-magnitude reward reveal (XP, combos,
-streaks, cosmetic loot) fires on top. **The learning engine is never corrupted — dopamine is purely
-cosmetic.**
+A personal experiment that wraps real Anki spaced-repetition scheduling (FSRS) in a TikTok/gacha-style swipe-and-reward interface — the rewards are cosmetic and never touch the schedule.
 
-Built by a mixed **Codex (GPT-5.6 "sol") + Claude** engineering team, orchestrated by Claude.
+> 日本語要約: Anki の FSRS 復習をそのまま裏で動かしつつ、TikTok／ガチャ風の「報酬演出」を被せた個人用の学習ツール実験（MVP）。
 
----
+## Status
 
-## What makes it "wrap Anki, not replace it"
-- The SRS engine sits behind one interface (`AnkiEngine`) with **two real implementations**:
-  - **`AnkiLibEngine`** (primary) — drives the actual `anki==26.5` library: your real
-    `collection.anki2`, the real V3 scheduler, real FSRS. No Anki desktop required.
-  - **`FsrsSqliteEngine`** (fallback) — standalone `fsrs==6.3.1` + SQLite, self-contained.
-- Ratings map exactly to Anki: `1=Again, 2=Hard, 3=Good, 4=Easy`.
-- No reward mechanic ever changes card order, due dates, ratings, or FSRS parameters.
+**MVP — built over two days (2026-07-19/20), single-user, not in active development.** The core loop works locally; deployment paths and some features are untested outside the original machine.
 
-## The dopamine layer (evidence-based, see `research/addiction-ux.md`)
-Variable-magnitude XP reveal (dopamine = prediction error), grade-scaled particles + rising-pitch
-audio + opt-in haptics, in-session **combo multiplier** (resets the combo only — never the schedule),
-daily **streak** with an **honest streak-freeze**, XP leveling, a **variable-ratio loot roll** with
-rarity tiers + a **pity system**, and an ethics-gated **near-miss** reveal (always honestly labeled
-`truth:"no_drop"`, never a phantom item).
+| | |
+|---|---|
+| ✅ Works | Backend: FastAPI app with two SRS engines — `AnkiLibEngine` (drives the real `anki` Python library, V3 scheduler + FSRS) and `FsrsSqliteEngine` (standalone `fsrs` + SQLite). Backend test suite: **84 passed** (re-run 2026-09-28 on Python 3.12 with `anki` 26.9.3 / `fsrs` 6.3.2, from the repo root). |
+| ✅ Works | Reward layer (`backend/app/game/rewards.py`): XP, combo, streak, loot roll with pity counters, near-miss flag; ethics toggles (`session_length_cap_minutes` → `429 SESSION_CAP_REACHED`, `honest_streak_mode`, `no_dark_pattern_mode` with a "Continue" gate every 10 reviews). Covered by unit tests. |
+| ✅ Works | `.apkg` import (legacy and zstd `anki21b` packages, media + CSS), media serving, template rendering — covered by backend tests with fixture decks. |
+| ✅ Works | Frontend (Vite + TypeScript) strict build (`npm run build`) succeeds; in-browser mock mode (`?mock=1`) needs no backend. |
+| 🚧 Partial | AnkiWeb sync endpoints exist (Anki engine only) but are tested against fakes; not verified here against a live AnkiWeb account. |
+| 🚧 Partial | Playwright E2E specs (6 specs in `frontend/e2e/`) hard-code machine-specific absolute paths in `playwright.config.ts` and two specs, so they will not run on another machine without editing. Not re-run. |
+| 🚧 Partial | Deployment configs (`Dockerfile`, `fly.toml`, `railway.json`, GitHub Pages workflow) are included but were not verified for this README. |
+| ⚠️ Known issues | `scripts/dev.sh` / `serve.sh` expect a virtualenv at `.venv/` in the repo root (not committed). Backend tests resolve fixture paths relative to the working directory — run them from the repo root. `frontend/dist/` is committed. No LICENSE file (see License). |
 
-## Ethics guardrails (transparent + toggleable — `docs/ARCHITECTURE.md §9`)
-- `session_length_cap_minutes` (default 20) → `429 SESSION_CAP_REACHED`
-- `honest_streak_mode` (default on) → strictly consecutive days, no freeze magic
-- `no_dark_pattern_mode` → suppresses near-miss, discloses exact drop odds, adds a deliberate
-  "Continue" gate every 10 reviews. All odds + pity counters are inspectable in-app.
+**Development note:** the repository states it was built by a mixed Codex + Claude agent team orchestrated by Claude. The agent prompts, notes and logs are kept in `orchestration/` for transparency.
 
----
+## Background
 
-## Run it (two terminals)
+A personal learning-tool experiment: can the "variable reward" mechanics of short-video feeds and gacha games make daily flashcard review more engaging *without* corrupting the learning algorithm? The design rule is that the SRS engine is the source of truth; the dopamine layer only decorates it. Background notes are in `research/` (`addiction-ux.md`, `anki-ecosystem.md`, `animation-ecosystem.md`).
 
-**1. Backend** (Python 3.14; a venv with `anki`, `fsrs`, `fastapi` is at `.venv/`):
-```bash
-cd anki-addiction
-./scripts/dev.sh                       # uvicorn on http://localhost:8000  (fsrs engine by default)
-# or point at a real Anki collection:
-# DOPAMINE_SRS_ENGINE=anki DOPAMINE_ANKI_COLLECTION=/path/to/collection.anki2 ./scripts/dev.sh
-```
+## How it works
 
-**2. Frontend** (Node 22):
-```bash
-cd anki-addiction/frontend
-npm install
-npm run dev                            # http://localhost:5173  (proxies /api → :8000)
-```
-Open http://localhost:5173, tap **Seed demo deck**, and start swiping.
-Demo the UI standalone with no backend at all: http://localhost:5173/?mock=1
+- **Wrap Anki, don't replace it.** The SRS engine sits behind one interface (`backend/app/srs/base.py`). Ratings map exactly to Anki (`1=Again, 2=Hard, 3=Good, 4=Easy`). No reward mechanic changes card order, due dates, ratings, or FSRS parameters.
+- **Reward layer.** Variable-magnitude XP reveal, grade-scaled particles/audio (opt-in haptics), in-session combo (resets the combo only, never the schedule), daily streak, XP levels, a variable-ratio loot roll with rarity tiers and a pity system, and a near-miss reveal that is always labeled honestly (`truth: "no_drop"`). Rewards are seeded per review via HMAC, so they are deterministic and idempotent.
+- **Ethics guardrails** are transparent and toggleable (`docs/ARCHITECTURE.md` §9); drop odds and pity counters are inspectable in-app.
+- **Display prefs** (device-local): card font size and an optional per-card timer.
 
-## Run it on your phone (same Wi-Fi)
-
-One command builds the app and serves **everything** (API + UI) from a single
-server bound to your LAN — the SPA calls the API same-origin, so there's no
-`localhost` trap and no CORS to configure:
-```bash
-./scripts/serve.sh          # builds frontend, runs the server on 0.0.0.0:8000
-```
-It prints a `http://<your-computer-ip>:8000` URL — open that in your phone's
-browser (phone on the same Wi-Fi). Tap **Seed demo deck** and swipe. Add it to
-your home screen for a full-screen, app-like feel.
-- For real decks/scheduling/sync on the phone, run with the Anki engine:
-  `DOPAMINE_SRS_ENGINE=anki DOPAMINE_ANKI_COLLECTION=/path/collection.anki2 ./scripts/serve.sh`
-- First connection may need you to allow incoming connections in the macOS
-  firewall. Plain-HTTP LAN means the offline service worker won't register
-  (secure-context only) — the app still works; it just won't cache for offline.
-
-## Publish a demo on GitHub Pages
-
-GitHub Pages serves **static files only**, so it can't run the Python backend —
-but the frontend has a full in-browser **mock mode**, so you can publish a
-**playable demo** (swipe/grade/reward/streak, all faked client-side; no real
-FSRS, import, media, or AnkiWeb sync). A workflow is included:
-- Push to `main` with Pages enabled (Settings → Pages → Source: **GitHub Actions**).
-  `.github/workflows/pages.yml` builds `npm run build:demo` (forces mock mode,
-  sets the base to `/<repo>/`) and deploys it.
-- Build it locally: `cd frontend && DOPAMINE_BASE=/anki-addiction/ npm run build:demo`
-  (output in `frontend/dist`).
-- **The real app (real Anki decks, scheduling, import, sync) needs the backend
-  running** — host it yourself (locally per above, or on any Python host) and
-  point the SPA at it with `?api=https://your-backend`.
-
-## Test it
-```bash
-./.venv/bin/python -m pytest backend/tests/ -q        # 84 passing (engines + API + rewards + import + media + sync)
-cd frontend && npm run build && npm run e2e           # strict-TS build + 5 headless Playwright specs
-```
-
----
-
-## Architecture at a glance
 ```
 Browser SPA (vertical swipe feed, reward overlay, HUD, audio/haptics/particles)
       │  JSON/HTTP /api  (client-UUID review_id → idempotent answers)
       ▼
-FastAPI  ──►  answer coordinator (write-lock, HMAC-seeded rewards, pending→complete recovery)
-      ├──►  AnkiEngine:  AnkiLibEngine (real anki 26.5 + FSRS)  |  FsrsSqliteEngine (fsrs + sqlite)
-      └──►  resolve_reward()  (pure, deterministic)  ──►  game.sqlite3 (player/rewards/config)
+FastAPI ──► answer coordinator (write-lock, HMAC-seeded rewards, pending→complete recovery)
+      ├──► AnkiEngine: AnkiLibEngine (anki + FSRS) | FsrsSqliteEngine (fsrs + sqlite)
+      └──► resolve_reward() (pure, deterministic) ──► game.sqlite3 (player/rewards/config)
 ```
-Full contract, reward formulas, and data model: **`docs/ARCHITECTURE.md`**.
-Team brief: `docs/TEAM_BRIEF.md`. Verified engine APIs: `backend/ENGINE_NOTES.md`.
 
-## Endpoints
-`GET /api/health` · `GET /api/next-card` · `POST /api/answer` · `GET /api/state` ·
-`GET /api/decks` · `POST /api/seed-demo` · `PUT /api/config`
+Endpoints: `GET /api/health` · `GET /api/next-card` · `POST /api/answer` · `GET /api/state` · `GET /api/decks` · `POST /api/seed-demo` · `POST /api/import` · `GET /api/media/{name}` · `PUT /api/config` · `POST /api/sync/login` · `POST /api/sync` · `POST /api/sync/full` · `GET /api/sync/status` · `POST /api/sync/logout`.
 
-## Licensing note
-The primary engine links the `anki` library, which is **AGPL-3.0**; this wrapper is subject to
-those terms when the Anki engine is used. The `fsrs` fallback path avoids that dependency.
+Full contract, reward formulas and data model: `docs/ARCHITECTURE.md`. Import/E2E design: `docs/IMPORT_AND_E2E.md`. Engine API notes: `backend/ENGINE_NOTES.md`.
+
+## Usage
+
+Requirements: Python ≥ 3.12, Node 22.
+
+**Backend**
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -e "backend[dev]"
+cp backend/.env.example backend/.env      # set DOPAMINE_SERVER_SECRET to a real value
+./scripts/dev.sh                          # uvicorn on :8000, FSRS engine by default
+# real Anki collection instead:
+# DOPAMINE_SRS_ENGINE=anki DOPAMINE_ANKI_COLLECTION=path/to/collection.anki2 ./scripts/dev.sh
+```
+
+**Frontend**
+```bash
+cd frontend && npm install
+npm run dev          # http://localhost:5173 (proxies /api → :8000)
+```
+Open the page, tap **Seed demo deck**, and swipe. `http://localhost:5173/?mock=1` runs the UI with no backend.
+
+**Phone on the same Wi-Fi:** `./scripts/serve.sh` builds the SPA and serves API + UI from one server on `0.0.0.0:8000`. Over plain HTTP the offline service worker does not register (secure context only); the app still works.
+
+**Static demo (GitHub Pages):** `.github/workflows/pages.yml` builds `npm run build:demo`, which forces mock mode — swipe/grade/reward is playable but faked in the browser (no real FSRS, import, media or sync). Local build: `cd frontend && DOPAMINE_BASE=/DopaMine/ npm run build:demo`.
+
+**Hosted:** see `docs/DEPLOY.md` (Docker image; Fly.io / Railway options). Unverified.
+
+**Tests**
+```bash
+python -m pytest backend/tests/ -q    # run from the repo root
+cd frontend && npm run build          # strict TS build
+# npm run e2e requires editing the hard-coded paths first (see Status)
+```
 
 ## Repo layout
 ```
-backend/app/srs/     base.py (AnkiEngine protocol) · anki_lib.py · fsrs_sqlite.py
-backend/app/game/    rewards.py  (pure deterministic reward engine)
+backend/app/srs/     base.py (engine protocol) · anki_lib.py · fsrs_sqlite.py
+backend/app/game/    rewards.py (pure deterministic reward engine)
 backend/app/         main.py · services/review.py · repository.py · db.py · demo.py · schemas.py
-frontend/src/        feed.ts · components/{card-view,hud,reward-overlay}.ts · effects.ts · mock.ts
-docs/ · research/ · orchestration/   (team brief, architecture, research, codex transcripts)
+backend/tests/       pytest suite + .apkg fixtures
+frontend/src/        feed.ts · components/{card-view,hud,reward-overlay}.ts · effects.ts · motion.ts · mock.ts
+docs/                architecture, import/E2E contract, deploy, animation spec, team brief
+research/            background research notes
+orchestration/       agent prompts, notes and logs from the build
 ```
+
+## Related
+
+- [Anki](https://apps.ankiweb.net/) and its Python library (`anki`)
+- [FSRS](https://github.com/open-spaced-repetition) / `fsrs` Python package
+
+## License
+
+No license file is included yet, so all rights are reserved by default. Note that the primary engine links the `anki` library, which is **AGPL-3.0**; any distribution using the Anki engine is subject to those terms. The `fsrs` fallback path avoids that dependency.
